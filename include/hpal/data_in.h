@@ -12,7 +12,7 @@
 #include "hpal/hpal.h"
 
 int mausb_send_in_data_msg(struct mausb_device *dev, struct mausb_event *event);
-int mausb_receive_in_data(struct mausb_device *dev, struct mausb_event *event,
-			  struct mausb_urb_ctx *urb_ctx);
+void mausb_receive_in_data(struct mausb_event *event,
+			   struct mausb_urb_ctx *urb_ctx);
 
 #endif /* __MAUSB_HPAL_DATA_IN_H__ */

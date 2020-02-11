@@ -17,13 +17,13 @@
 
 static void mausb_init_ip_ctx_helper(struct mausb_device *dev,
 				     struct mausb_ip_ctx **ip_ctx,
-				     uint16_t port,
+				     u16 port,
 				     enum mausb_channel channel)
 {
 	int status;
 
 	status = mausb_init_ip_ctx(ip_ctx, dev->net_ns,
-				   dev->dev_addr.Ip.Address.ip4, port, dev,
+				   dev->dev_addr.ip.address.ip4, port, dev,
 				   mausb_ip_callback, channel);
 	if (status < 0) {
 		mausb_pr_err("Init ip context failed with error=%d", status);
@@ -38,6 +38,8 @@ static void mausb_init_ip_ctx_helper(struct mausb_device *dev,
 static void mausb_connect_callback(struct mausb_device *dev, enum mausb_channel
 				channel, int status)
 {
+	struct mausb_device_address *dev_addr = &dev->dev_addr;
+
 	mausb_pr_info("Connect callback for channel=%d with status=%d",
 		      channel, status);
 
@@ -47,41 +49,41 @@ static void mausb_connect_callback(struct mausb_device *dev, enum mausb_channel
 	}
 
 	if (channel == MAUSB_MGMT_CHANNEL) {
-		if (dev->dev_addr.Ip.Port.control == 0) {
+		if (dev_addr->ip.port.control == 0) {
 			dev->channel_map[MAUSB_CTRL_CHANNEL] =
 				dev->mgmt_channel;
 			channel = MAUSB_CTRL_CHANNEL;
 		} else {
 			mausb_init_ip_ctx_helper(dev, &dev->ctrl_channel,
-					dev->dev_addr.Ip.Port.control,
-					MAUSB_CTRL_CHANNEL);
+						 dev_addr->ip.port.control,
+						 MAUSB_CTRL_CHANNEL);
 			return;
 		}
 	}
 
 	if (channel == MAUSB_CTRL_CHANNEL) {
-		if (dev->dev_addr.Ip.Port.bulk == 0) {
+		if (dev_addr->ip.port.bulk == 0) {
 			dev->channel_map[MAUSB_BULK_CHANNEL] =
 				dev->channel_map[MAUSB_CTRL_CHANNEL];
 			channel = MAUSB_BULK_CHANNEL;
 		} else {
 			mausb_init_ip_ctx_helper(dev, &dev->bulk_channel,
-					dev->dev_addr.Ip.Port.bulk,
-					MAUSB_BULK_CHANNEL);
+						 dev_addr->ip.port.bulk,
+						 MAUSB_BULK_CHANNEL);
 			return;
 		}
 	}
 
 	if (channel == MAUSB_BULK_CHANNEL) {
-		if (dev->dev_addr.Ip.Port.isochronous == 0) {
+		if (dev_addr->ip.port.isochronous == 0) {
 			/* if there is no isoch port use tcp for it */
 			dev->channel_map[MAUSB_ISOCH_CHANNEL] =
 				dev->channel_map[MAUSB_BULK_CHANNEL];
 			channel = MAUSB_ISOCH_CHANNEL;
 		} else {
 			mausb_init_ip_ctx_helper(dev, &dev->isoch_channel,
-					dev->dev_addr.Ip.Port.isochronous,
-					MAUSB_ISOCH_CHANNEL);
+						 dev_addr->ip.port.isochronous,
+						 MAUSB_ISOCH_CHANNEL);
 			return;
 		}
 	}
@@ -124,12 +126,8 @@ static void mausb_handle_receive_event(struct mausb_device *dev,
 	if (status == 0)
 		status = mausb_enqueue_event_to_user(dev, &event);
 
-	if (status < 0) {
+	if (status < 0)
 		mausb_pr_err("Failed to enqueue, status=%d", status);
-		queue_work(dev->workq, &dev->socket_disconnect_work);
-		queue_work(dev->workq, &dev->hcd_disconnect_work);
-		return;
-	}
 }
 
 void mausb_ip_callback(void *ctx, enum mausb_channel channel,

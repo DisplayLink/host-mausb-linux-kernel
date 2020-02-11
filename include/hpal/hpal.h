@@ -15,12 +15,11 @@
 
 #include "common/mausb_address.h"
 #include "common/mausb_event.h"
+#include "hcd/hub.h"
 #include "link/mausb_ip_link.h"
 
 #define MAUSB_CONTROL_SETUP_SIZE	8
 #define MAUSB_BUSY_RETRIES_COUNT	3
-#define MAUSB_BUSY_TIMEOUT_MIN		10000
-#define MAUSB_BUSY_TIMEOUT_MAX		10001
 #define MAUSB_HEARTBEAT_TIMEOUT_MS	1000
 #define MAUSB_CLIENT_STOPPED_TIMEOUT_MS	3000
 
@@ -30,17 +29,20 @@
 
 #define MAUSB_CHANNEL_MAP_LENGTH	4
 
+extern struct mss mss;
+extern struct mausb_hcd *mhcd;
+
 enum mausb_isoch_header_format_size {
-	ISOCH_SHORT_FORMAT_SIZE	   = 4,
-	ISOCH_STANDARD_FORMAT_SIZE = 8,
-	ISOCH_LONG_FORMAT_SIZE	   = 12
+	MAUSB_ISOCH_SHORT_FORMAT_SIZE	 = 4,
+	MAUSB_ISOCH_STANDARD_FORMAT_SIZE = 8,
+	MAUSB_ISOCH_LONG_FORMAT_SIZE	 = 12
 };
 
 struct mausb_completion {
 	struct list_head   list_entry;
 	struct completion  *completion_event;
 	struct mausb_event *mausb_event;
-	long		   event_id;
+	u64		   event_id;
 };
 
 struct mausb_mss_rings_events {
@@ -50,17 +52,17 @@ struct mausb_mss_rings_events {
 
 struct mss {
 	bool	   deinit_in_progress;
-	spinlock_t lock;
-	uint64_t   ring_buffer_id;
+	spinlock_t lock;	/* Protect mss structure */
+	u64	   ring_buffer_id;
 
 	struct completion empty;
 	struct completion client_stopped;
-	bool client_connected;
+	bool		  client_connected;
 	struct timer_list heartbeat_timer;
-	uint8_t		  missed_heartbeats;
+	u8		  missed_heartbeats;
 
 	struct list_head  madev_list;
-	atomic_t num_of_transitions_to_sleep;
+	atomic_t	  num_of_transitions_to_sleep;
 	struct list_head  available_ring_buffers;
 
 	struct mausb_mss_rings_events	 rings_events;
@@ -89,52 +91,62 @@ struct mausb_device {
 
 	struct kref refcount;
 	/* Set on port change event after cap resp */
-	uint8_t dev_type;
-	uint8_t dev_speed;
-	uint8_t lse;
-	uint8_t madev_addr;
-	uint8_t dev_connected;
+	u8 dev_type;
+	u8 dev_speed;
+	u8 lse;
+	u8 madev_addr;
+	u8 dev_connected;
+	u16 id;
+	u16 port_number;
 
-	uint16_t id;
-	uint16_t port_number;
+	u64		event_id;
+	spinlock_t	event_id_lock; /* Lock event ID increments */
 
 	struct list_head completion_events;
-	atomic_long_t	 event_id;
-	spinlock_t	 completion_events_lock;
+	spinlock_t	 completion_events_lock; /* Lock completion events */
 
 	struct completion user_finished_event;
-	uint32_t	  num_of_user_events;
-	spinlock_t	  num_of_user_events_lock;
+	u16		  num_of_user_events;
+	u16		  num_of_completed_events;
+
+	spinlock_t	  num_of_user_events_lock; /* Lock user events count */
 
 	struct timer_list connection_timer;
-	uint8_t		  receive_failures_num;
-	spinlock_t	  connection_timer_lock;
+	u8		  receive_failures_num;
+	spinlock_t	  connection_timer_lock; /* Lock connection timer */
 
 	atomic_t	  unresponsive_client;
 
-	atomic_t num_of_usb_devices;
+	atomic_t	  num_of_usb_devices;
 };
 
 struct mausb_urb_ctx *mausb_find_urb_in_tree(struct urb *urb);
 struct mausb_urb_ctx *mausb_unlink_and_delete_urb_from_tree(struct urb *urb,
 							    int status);
-struct mausb_device *mausb_get_dev_from_addr_unsafe(uint8_t madev_addr);
+struct mausb_device *mausb_get_dev_from_addr_unsafe(u8 madev_addr);
 
-static inline long mausb_event_id(struct mausb_device *dev)
+static inline u64 mausb_event_id(struct mausb_device *dev)
 {
-	long val = atomic_long_inc_return(&dev->event_id);
+	unsigned long flags;
+	u64 val;
+
+	spin_lock_irqsave(&dev->event_id_lock, flags);
+	val = ++(dev->event_id);
+	spin_unlock_irqrestore(&dev->event_id_lock, flags);
+
 	return val;
 }
 
 int mausb_initiate_dev_connection(struct mausb_device_address device_address,
-				  uint8_t madev_address);
-int mausb_enqueue_event_from_user(uint8_t madev_addr, uint32_t num_of_events);
+				  u8 madev_address);
+int mausb_enqueue_event_from_user(u8 madev_addr, u16 num_of_events,
+				  u16 num_of_completed);
 int mausb_enqueue_event_to_user(struct mausb_device *dev,
 				struct mausb_event *event);
-int mausb_data_req_enqueue_event(struct mausb_device *dev, uint16_t ep_handle,
+int mausb_data_req_enqueue_event(struct mausb_device *dev, u16 ep_handle,
 				 struct urb *request);
 int mausb_signal_event(struct mausb_device *dev, struct mausb_event *event,
-		       long event_id);
+		       u64 event_id);
 int mausb_insert_urb_in_tree(struct urb *urb, bool link_urb_to_ep);
 
 static inline void mausb_insert_event(struct mausb_device *dev,
@@ -157,11 +169,9 @@ static inline void mausb_remove_event(struct mausb_device *dev,
 	spin_unlock_irqrestore(&dev->completion_events_lock, flags);
 }
 
-/* After this function call only valid thing to do with urb is to give it back*/
 void mausb_release_ma_dev_async(struct kref *kref);
 void mausb_on_madev_connected(struct mausb_device *dev);
-void mausb_complete_request(struct urb *urb, uint32_t actual_length,
-			int status);
+void mausb_complete_request(struct urb *urb, u32 actual_length, int status);
 void mausb_complete_urb(struct mausb_event *event);
 void mausb_reset_connection_timer(struct mausb_device *dev);
 void mausb_reset_heartbeat_cnt(void);

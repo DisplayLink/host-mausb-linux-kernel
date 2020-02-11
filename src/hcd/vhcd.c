@@ -13,14 +13,15 @@
 #include <linux/module.h>
 
 #include "hcd/hub.h"
+#include "hpal/hpal.h"
 #include "utils/mausb_logs.h"
 
 static int mausb_open(struct inode *inode, struct file *file);
 static int mausb_release(struct inode *inode, struct file *file);
 static ssize_t mausb_read(struct file *file, char __user *buffer, size_t length,
-			loff_t *offset);
+			  loff_t *offset);
 static ssize_t mausb_write(struct file *file, const char __user *buffer,
-			size_t length, loff_t *offset);
+			   size_t length, loff_t *offset);
 static long mausb_ioctl(struct file *file, unsigned int ioctl_func,
 			unsigned long ioctl_buffer);
 static int mausb_bus_probe(struct device *dev);
@@ -75,20 +76,16 @@ static void mausb_remove(void)
 
 static int mausb_bus_probe(struct device *dev)
 {
-	mausb_pr_info("");
 	return mausb_probe(dev);
 }
 
 static int mausb_bus_remove(struct device *dev)
 {
-	mausb_pr_info("");
 	return 0;
 }
 
 static int mausb_bus_match(struct device *dev, struct device_driver *drv)
 {
-	mausb_pr_info("");
-
 	if (strncmp(dev->bus->name, drv->name, strlen(drv->name)))
 		return 0;
 	else
@@ -97,34 +94,29 @@ static int mausb_bus_match(struct device *dev, struct device_driver *drv)
 
 static int mausb_open(struct inode *inode, struct file *file)
 {
-	mausb_pr_info("");
 	return 0;
 }
 
 static int mausb_release(struct inode *inode, struct file *file)
 {
-	mausb_pr_info("");
 	return 0;
 }
 
 static ssize_t mausb_read(struct file *file, char __user *buffer, size_t length,
-		   loff_t *offset)
+			  loff_t *offset)
 {
-	mausb_pr_info("");
 	return 0;
 }
 
 static ssize_t mausb_write(struct file *file, const char __user *buffer,
-			size_t length, loff_t *offset)
+			   size_t length, loff_t *offset)
 {
-	mausb_pr_info("");
 	return 0;
 }
 
 static long mausb_ioctl(struct file *file, unsigned int ioctl_func,
-		 unsigned long ioctl_buffer)
+			unsigned long ioctl_buffer)
 {
-	mausb_pr_info("");
 	return 0;
 }
 
@@ -138,7 +130,7 @@ int mausb_init_hcd(void)
 		return retval;
 	}
 
-	major = retval;
+	major = (unsigned int)retval;
 	retval = bus_register(&mausb_bus_type);
 	if (retval) {
 		mausb_pr_err("Bus_register failed %d", retval);
@@ -158,8 +150,8 @@ int mausb_init_hcd(void)
 	}
 
 	mhcd = kzalloc(sizeof(*mhcd), GFP_ATOMIC);
-	if (unlikely(!mhcd)) {
-		mausb_pr_alert("Mausb_hcd allocation failed");
+	if (!mhcd) {
+		retval = -ENOMEM;
 		goto mausb_hcd_alloc_failed;
 	}
 
@@ -209,8 +201,91 @@ void mausb_deinit_hcd(void)
 		class_destroy(mausb_class);
 		bus_unregister(&mausb_bus_type);
 		unregister_chrdev(major, DEVICE_NAME);
-		kfree(mhcd);
 	}
 
 	mausb_pr_info("Finish");
+}
+
+void mausb_port_has_changed(const enum mausb_device_type device_type,
+			    const enum mausb_device_speed device_speed,
+			    void *ma_dev)
+{
+	struct usb_hcd *hcd;
+	unsigned long flags = 0;
+	struct mausb_device *dev = ma_dev;
+	u16 port_number = dev->port_number;
+
+	spin_lock_irqsave(&mhcd->lock, flags);
+
+	if (device_type == USB20HUB || device_speed < SUPER_SPEED) {
+		mhcd->hcd_hs_ctx->ma_devs[port_number].port_status |=
+		    USB_PORT_STAT_CONNECTION | (1 <<
+						USB_PORT_FEAT_C_CONNECTION);
+
+		if (device_speed == LOW_SPEED) {
+			mhcd->hcd_hs_ctx->ma_devs[port_number].port_status |=
+			    MAUSB_PORT_20_STATUS_LOW_SPEED;
+			mhcd->hcd_hs_ctx->ma_devs[port_number].dev_speed =
+			    LOW_SPEED;
+		} else if (device_speed == HIGH_SPEED) {
+			mhcd->hcd_hs_ctx->ma_devs[port_number].port_status |=
+			    MAUSB_PORT_20_STATUS_HIGH_SPEED;
+			mhcd->hcd_hs_ctx->ma_devs[port_number].dev_speed =
+			    HIGH_SPEED;
+		}
+
+		hcd = mhcd->hcd_hs_ctx->hcd;
+		mhcd->hcd_hs_ctx->ma_devs[port_number].ma_dev = ma_dev;
+	} else {
+		mhcd->hcd_ss_ctx->ma_devs[port_number].port_status |=
+		    USB_PORT_STAT_CONNECTION | (1 <<
+						USB_PORT_FEAT_C_CONNECTION);
+		mhcd->hcd_ss_ctx->ma_devs[port_number].dev_speed = SUPER_SPEED;
+
+		hcd = mhcd->hcd_ss_ctx->hcd;
+		mhcd->hcd_ss_ctx->ma_devs[port_number].ma_dev = ma_dev;
+	}
+	spin_unlock_irqrestore(&mhcd->lock, flags);
+
+	usb_hcd_poll_rh_status(hcd);
+}
+
+void mausb_hcd_disconnect(const u16 port_number,
+			  const enum mausb_device_type device_type,
+			  const enum mausb_device_speed device_speed)
+{
+	struct usb_hcd *hcd;
+	unsigned long flags = 0;
+
+	if (port_number >= NUMBER_OF_PORTS) {
+		mausb_pr_err("port number out of range, port_number=%x",
+			     port_number);
+		return;
+	}
+
+	spin_lock_irqsave(&mhcd->lock, flags);
+
+	if (device_type == USB20HUB || device_speed < SUPER_SPEED) {
+		mhcd->hcd_hs_ctx->ma_devs[port_number].port_status &=
+			~(USB_PORT_STAT_CONNECTION);
+		mhcd->hcd_hs_ctx->ma_devs[port_number].port_status &=
+			~(USB_PORT_STAT_ENABLE);
+		mhcd->hcd_hs_ctx->ma_devs[port_number].port_status |=
+			(1 << USB_PORT_FEAT_C_CONNECTION);
+		hcd = mhcd->hcd_hs_ctx->hcd;
+	} else {
+		mhcd->hcd_ss_ctx->ma_devs[port_number].port_status &=
+			~(USB_PORT_STAT_CONNECTION);
+		mhcd->hcd_ss_ctx->ma_devs[port_number].port_status &=
+			~(USB_PORT_STAT_ENABLE);
+		mhcd->hcd_ss_ctx->ma_devs[port_number].port_status |=
+			(1 << USB_PORT_FEAT_C_CONNECTION);
+		hcd = mhcd->hcd_ss_ctx->hcd;
+	}
+
+	spin_unlock_irqrestore(&mhcd->lock, flags);
+	if (!hcd)
+		return;
+
+	usb_hcd_poll_rh_status(hcd);
 }

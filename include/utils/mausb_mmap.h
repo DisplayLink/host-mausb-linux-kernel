@@ -9,8 +9,7 @@
 #ifndef __MAUSB_UTILS_MAUSB_MMAP_H__
 #define __MAUSB_UTILS_MAUSB_MMAP_H__
 
-extern struct mss mss;
-extern struct mausb_ring_buffer mausb_ring;
+#include "utils/mausb_ring_buffer.h"
 
 int mausb_create_dev(void);
 

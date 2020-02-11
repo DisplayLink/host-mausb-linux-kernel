@@ -14,9 +14,9 @@
 #include "hpal/isoch_out.h"
 #include "utils/mausb_logs.h"
 
-static inline struct mausb_ip_ctx *mausb_get_data_channel(
-						struct mausb_device *ma_dev,
-						enum mausb_channel channel)
+static inline
+struct mausb_ip_ctx *mausb_get_data_channel(struct mausb_device *ma_dev,
+					    enum mausb_channel channel)
 {
 	if (channel >= MAUSB_CHANNEL_MAP_LENGTH)
 		return NULL;
@@ -49,6 +49,7 @@ int mausb_send_transfer_ack(struct mausb_device *dev, struct mausb_event *event)
 	struct ma_usb_hdr_common *ack_hdr;
 	struct kvec kvec;
 	struct mausb_kvec_data_wrapper data_to_send;
+	enum mausb_channel channel;
 
 	ack_hdr = (struct ma_usb_hdr_common *)(&event->data.hdr_ack);
 
@@ -58,9 +59,8 @@ int mausb_send_transfer_ack(struct mausb_device *dev, struct mausb_event *event)
 	data_to_send.kvec_num	    = 1;
 	data_to_send.length	    = ack_hdr->length;
 
-	return mausb_send_data(dev, mausb_transfer_type_to_channel(
-					event->data.transfer_type),
-				&data_to_send);
+	channel = mausb_transfer_type_to_channel(event->data.transfer_type);
+	return mausb_send_data(dev, channel, &data_to_send);
 }
 
 int mausb_send_data_msg(struct mausb_device *dev, struct mausb_event *event)
@@ -84,16 +84,17 @@ int mausb_send_data_msg(struct mausb_device *dev, struct mausb_event *event)
 		return status;
 	}
 
-	if (mausb_isoch_data_event(event))
+	if (mausb_isoch_data_event(event)) {
 		if (event->data.direction == MAUSB_DATA_MSG_DIRECTION_IN)
-			status =  mausb_send_isoch_in_msg(dev, event);
+			status = mausb_send_isoch_in_msg(dev, event);
 		else
 			status = mausb_send_isoch_out_msg(dev, event, urb_ctx);
-	else
+	} else {
 		if (event->data.direction == MAUSB_DATA_MSG_DIRECTION_IN)
-			status =  mausb_send_in_data_msg(dev, event);
+			status = mausb_send_in_data_msg(dev, event);
 		else
 			status = mausb_send_out_data_msg(dev, event, urb_ctx);
+	}
 
 	return status;
 }
@@ -108,7 +109,7 @@ int mausb_receive_data_msg(struct mausb_device *dev, struct mausb_event *event)
 	if (!mausb_isoch_data_event(event)) {
 		status = mausb_send_transfer_ack(dev, event);
 		if (status < 0) {
-			mausb_pr_warn("Sending acknowledgement failed");
+			mausb_pr_warn("Sending acknowledgment failed");
 			goto cleanup;
 		}
 	}
@@ -121,17 +122,18 @@ int mausb_receive_data_msg(struct mausb_device *dev, struct mausb_event *event)
 		goto cleanup;
 	}
 
-	if (mausb_isoch_data_event(event))
+	if (mausb_isoch_data_event(event)) {
 		if (event->data.direction == MAUSB_DATA_MSG_DIRECTION_IN)
 			status = mausb_receive_isoch_in_data(dev, event,
 							     urb_ctx);
 		else
-			status = mausb_receive_isoch_out(dev, event, urb_ctx);
-	else
+			status = mausb_receive_isoch_out(event);
+	} else {
 		if (event->data.direction == MAUSB_DATA_MSG_DIRECTION_IN)
-			status = mausb_receive_in_data(dev, event, urb_ctx);
+			mausb_receive_in_data(event, urb_ctx);
 		else
-			status = mausb_receive_out_data(dev, event, urb_ctx);
+			mausb_receive_out_data(event, urb_ctx);
+	}
 
 cleanup:
 	mausb_release_event_resources(event);

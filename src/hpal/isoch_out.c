@@ -16,31 +16,35 @@
 #include "utils/mausb_data_iterator.h"
 #include "utils/mausb_logs.h"
 
-static struct ma_usb_hdr_common *__mausb_create_isoch_out_transfer_packet(
-					struct mausb_event *event,
-					struct mausb_urb_ctx *urb_ctx,
-					uint16_t payload_size, uint32_t seq_n,
-					uint32_t start_of_segments,
-					uint32_t number_of_segments)
+static inline u32
+__mausb_calculate_isoch_common_header_size(u32 num_of_segments)
+{
+	return MAUSB_ISOCH_TRANSFER_HDR_SIZE +
+			MAUSB_ISOCH_STANDARD_FORMAT_SIZE * num_of_segments;
+}
+
+static struct ma_usb_hdr_common *
+__mausb_create_isoch_out_transfer_packet(struct mausb_event *event,
+					 struct mausb_urb_ctx *urb_ctx,
+					 u16 payload_size, u32 seq_n,
+					 u32 start_of_segments,
+					 u32 number_of_segments)
 {
 	struct ma_usb_hdr_common		 *hdr;
 	struct ma_usb_hdr_isochtransfer		 *hdr_isochtransfer;
 	struct ma_usb_hdr_isochdatablock_std	 *isoc_header_std;
 	struct ma_usb_hdr_isochtransfer_optional *hdr_opt_isochtransfer;
-	struct urb *urb = (struct urb *) event->data.urb;
+	struct urb *urb = (struct urb *)event->data.urb;
 	void *isoc_headers = NULL;
-	uint16_t length = 0;
-	uint16_t i;
+	u32 length;
+	u16 i;
 	unsigned long block_length;
-	uint32_t number_of_packets = (uint32_t)event->data.isoch_seg_num;
-	uint16_t size_of_request;
-
-	size_of_request = MAUSB_ISOCH_TRANSFER_HDR_SIZE +
-			  ISOCH_STANDARD_FORMAT_SIZE * number_of_segments;
+	u32 number_of_packets = (u32)event->data.isoch_seg_num;
+	u32 size_of_request =
+		__mausb_calculate_isoch_common_header_size(number_of_segments);
 
 	hdr = kzalloc(size_of_request, GFP_KERNEL);
-	if (unlikely(!hdr)) {
-		mausb_pr_alert("Header allocation failed");
+	if (!hdr) {
 		return NULL;
 	}
 
@@ -51,11 +55,11 @@ static struct ma_usb_hdr_common *__mausb_create_isoch_out_transfer_packet(
 	hdr->handle.epv	  = event->data.ep_handle;
 	hdr->data.status  = MA_USB_HDR_STATUS_NO_ERROR;
 	hdr->data.eps	  = MAUSB_TRANSFER_RESERVED;
-	hdr->data.t_flags = usb_endpoint_type(&urb->ep->desc) << 3;
+	hdr->data.t_flags = (u8)(usb_endpoint_type(&urb->ep->desc) << 3);
 
 	isoc_headers = shift_ptr(hdr, MAUSB_ISOCH_TRANSFER_HDR_SIZE);
 
-	for (i = (uint16_t)start_of_segments;
+	for (i = (u16)start_of_segments;
 	     i < number_of_segments + start_of_segments; ++i) {
 		block_length = i < number_of_packets - 1 ?
 			urb->iso_frame_desc[i + 1].offset -
@@ -65,26 +69,25 @@ static struct ma_usb_hdr_common *__mausb_create_isoch_out_transfer_packet(
 
 		urb->iso_frame_desc[i].status = MA_USB_HDR_STATUS_UNSUCCESSFUL;
 		isoc_header_std = (struct ma_usb_hdr_isochdatablock_std *)
-				   shift_ptr(isoc_headers,
-					(uint64_t)ISOCH_STANDARD_FORMAT_SIZE *
-					(i - start_of_segments));
-		isoc_header_std->block_length	 = (uint16_t)block_length;
+			shift_ptr(isoc_headers,
+				  (u64)MAUSB_ISOCH_STANDARD_FORMAT_SIZE *
+				  (i - start_of_segments));
+		isoc_header_std->block_length	 = (u16)block_length;
 		isoc_header_std->segment_number  = i;
 		isoc_header_std->s_flags	 = 0;
-		isoc_header_std->segment_length  = (uint16_t)block_length;
+		isoc_header_std->segment_length  = (u16)block_length;
 		isoc_header_std->fragment_offset = 0;
 	}
 
-	length = (ISOCH_STANDARD_FORMAT_SIZE * number_of_segments)
-		 + MAUSB_ISOCH_TRANSFER_HDR_SIZE;
+	length = __mausb_calculate_isoch_common_header_size(number_of_segments);
 
-	hdr->flags		   |= MA_USB_HDR_FLAGS_TIMESTAMP;
-	hdr->type		    = MA_USB_HDR_TYPE_DATA_REQ(ISOCHTRANSFER);
-	hdr->data.headers	    = (uint16_t)number_of_segments;
-	hdr->data.i_flags	    = MA_USB_DATA_IFLAGS_HDR_FMT_STD |
+	hdr->flags		|= MA_USB_HDR_FLAGS_TIMESTAMP;
+	hdr->type		 = (u8)MA_USB_HDR_TYPE_DATA_REQ(ISOCHTRANSFER);
+	hdr->data.headers	 = (u16)number_of_segments;
+	hdr->data.i_flags	 = MA_USB_DATA_IFLAGS_HDR_FMT_STD |
 				      MA_USB_DATA_IFLAGS_ASAP;
-	hdr_isochtransfer	    = mausb_get_isochtransfer_hdr(hdr);
 	hdr_opt_isochtransfer	    = mausb_hdr_isochtransfer_optional_hdr(hdr);
+	hdr_isochtransfer	    = mausb_get_isochtransfer_hdr(hdr);
 	hdr_isochtransfer->req_id   = event->data.req_id;
 	hdr_isochtransfer->seq_n    = seq_n;
 	hdr_isochtransfer->segments = number_of_packets;
@@ -94,19 +97,18 @@ static struct ma_usb_hdr_common *__mausb_create_isoch_out_transfer_packet(
 	hdr_opt_isochtransfer->timestamp = MA_USB_TRANSFER_RESERVED;
 	hdr_opt_isochtransfer->mtd	 = MA_USB_TRANSFER_RESERVED;
 
-	hdr->length = length + payload_size;
+	hdr->length = (u16)length + payload_size;
 
 	return hdr;
 }
 
-static int mausb_add_data_chunk(void *buffer, uint32_t buffer_size,
+static int mausb_add_data_chunk(void *buffer, u32 buffer_size,
 				struct list_head *chunks_list)
 {
 	struct mausb_payload_chunk *data_chunk = NULL;
 
 	data_chunk = kzalloc(sizeof(*data_chunk), GFP_KERNEL);
-	if (unlikely(!data_chunk)) {
-		mausb_pr_alert("Data chunk allocation failed");
+	if (!data_chunk) {
 		return -ENOMEM;
 	}
 
@@ -120,16 +122,12 @@ static int mausb_add_data_chunk(void *buffer, uint32_t buffer_size,
 
 static int mausb_init_header_data_chunk(struct ma_usb_hdr_common *common_hdr,
 					struct list_head *chunks_list,
-					uint32_t *num_of_data_chunks,
-					uint32_t num_of_packets)
+					u32 *num_of_data_chunks,
+					u32 num_of_packets)
 {
-	uint32_t header_size = MAUSB_ISOCH_TRANSFER_HDR_SIZE +
-			       ISOCH_STANDARD_FORMAT_SIZE * num_of_packets;
-	int status;
-
-	status = mausb_add_data_chunk(common_hdr, header_size, chunks_list);
-
-	/* Success */
+	u32 header_size =
+		__mausb_calculate_isoch_common_header_size(num_of_packets);
+	int status = mausb_add_data_chunk(common_hdr, header_size, chunks_list);
 	if (!status)
 		++(*num_of_data_chunks);
 
@@ -138,10 +136,10 @@ static int mausb_init_header_data_chunk(struct ma_usb_hdr_common *common_hdr,
 
 static int mausb_init_data_wrapper(struct mausb_kvec_data_wrapper *data,
 				   struct list_head *chunks_list,
-				   uint32_t num_of_data_chunks)
+				   u32 num_of_data_chunks)
 {
 	struct mausb_payload_chunk *data_chunk = NULL, *tmp = NULL;
-	uint32_t current_kvec = 0;
+	u32 current_kvec = 0;
 
 	data->length = 0;
 	data->kvec = kcalloc(num_of_data_chunks, sizeof(struct kvec),
@@ -171,18 +169,17 @@ static void mausb_cleanup_chunks_list(struct list_head *chunks_list)
 	}
 }
 
-static int mausb_prepare_isoch_out_transfer_packet(
-			struct ma_usb_hdr_common *hdr,
-			struct mausb_event *event,
-			struct mausb_urb_ctx *urb_ctx,
-			struct mausb_kvec_data_wrapper *result_data_wrapper)
+static
+int mausb_prepare_isoch_out_transfer_packet(struct ma_usb_hdr_common *hdr,
+					    struct mausb_event *event,
+					    struct mausb_urb_ctx *urb_ctx,
+					    struct mausb_kvec_data_wrapper *
+					    result_data_wrapper)
 {
-	uint32_t num_of_data_chunks	    = 0;
-	uint32_t num_of_payload_data_chunks = 0;
-	uint32_t payload_data_size	    = 0;
-	uint32_t size_of_header		    = MAUSB_ISOCH_TRANSFER_HDR_SIZE +
-					      ISOCH_STANDARD_FORMAT_SIZE *
-					      event->data.isoch_seg_num;
+	u32 num_of_data_chunks	       = 0;
+	u32 num_of_payload_data_chunks = 0;
+	u32 segment_number	       = event->data.isoch_seg_num;
+	u32 payload_data_size;
 	struct list_head chunks_list;
 	struct list_head payload_data_chunks;
 	int status = 0;
@@ -191,21 +188,22 @@ static int mausb_prepare_isoch_out_transfer_packet(
 
 	/* Initialize data chunk for MAUSB header and add it to chunks list */
 	if (mausb_init_header_data_chunk(hdr, &chunks_list, &num_of_data_chunks,
-					 event->data.isoch_seg_num) < 0){
+					 segment_number) < 0) {
 		status = -ENOMEM;
-			goto l_cleanup_data_chunks;
+		goto cleanup_data_chunks;
 	}
 
 	/* Get data chunks for data payload to send */
 	INIT_LIST_HEAD(&payload_data_chunks);
-	payload_data_size = hdr->length - size_of_header;
+	payload_data_size = hdr->length -
+		__mausb_calculate_isoch_common_header_size(segment_number);
 
 	if (mausb_data_iterator_read(&urb_ctx->iterator, payload_data_size,
 				     &payload_data_chunks,
-				     &num_of_payload_data_chunks) < 0){
+				     &num_of_payload_data_chunks) < 0) {
 		mausb_pr_err("Data iterator read failed");
 		status = -ENOMEM;
-		goto l_cleanup_data_chunks;
+		goto cleanup_data_chunks;
 	}
 
 	list_splice_tail(&payload_data_chunks, &chunks_list);
@@ -216,26 +214,30 @@ static int mausb_prepare_isoch_out_transfer_packet(
 				    num_of_data_chunks) < 0) {
 		mausb_pr_err("Data wrapper init failed");
 		status = -ENOMEM;
-		goto l_cleanup_data_chunks;
+		goto cleanup_data_chunks;
 	}
 
-l_cleanup_data_chunks:
+cleanup_data_chunks:
 	mausb_cleanup_chunks_list(&chunks_list);
 	return status;
 }
 
 static int mausb_create_and_send_isoch_transfer_req(struct mausb_device *dev,
-			struct mausb_event *event,
-			struct mausb_urb_ctx *urb_ctx, uint32_t *seq_n,
-			uint32_t payload_size, uint32_t start_of_segments,
-			uint32_t number_of_segments)
+						    struct mausb_event *event,
+						    struct mausb_urb_ctx
+						    *urb_ctx, u32 *seq_n,
+						    u32 payload_size,
+						    u32 start_of_segments,
+						    u32 number_of_segments)
 {
 	struct ma_usb_hdr_common *hdr;
 	struct mausb_kvec_data_wrapper data_to_send;
 	int status;
+	enum mausb_channel channel;
 
 	hdr = __mausb_create_isoch_out_transfer_packet(event, urb_ctx,
-						       payload_size, *seq_n,
+						       (u16)payload_size,
+						       *seq_n,
 						       start_of_segments,
 						       number_of_segments);
 	if (!hdr) {
@@ -252,9 +254,8 @@ static int mausb_create_and_send_isoch_transfer_req(struct mausb_device *dev,
 		return status;
 	}
 
-	status = mausb_send_data(dev, mausb_transfer_type_to_channel(
-						event->data.transfer_type),
-				&data_to_send);
+	channel = mausb_transfer_type_to_channel(event->data.transfer_type);
+	status = mausb_send_data(dev, channel, &data_to_send);
 
 	kfree(hdr);
 	kfree(data_to_send.kvec);
@@ -263,16 +264,17 @@ static int mausb_create_and_send_isoch_transfer_req(struct mausb_device *dev,
 }
 
 static inline int __mausb_send_isoch_out_packet(struct mausb_device *dev,
-			struct mausb_event *event,
-			struct mausb_urb_ctx *urb_ctx, uint32_t *seq_n,
-			uint32_t *starting_segments, uint32_t *rem_transfer_buf,
-			uint32_t *payload_size, int index)
+						struct mausb_event *event,
+						struct mausb_urb_ctx *urb_ctx,
+						u32 *seq_n,
+						u32 *starting_segments,
+						u32 *rem_transfer_buf,
+						u32 *payload_size, u32 index)
 {
 	int status = mausb_create_and_send_isoch_transfer_req(dev, event,
 					urb_ctx, seq_n, *payload_size,
 					*starting_segments,
 					index - *starting_segments);
-
 	if (status < 0) {
 		mausb_pr_err("ISOCH transfer request create and send failed");
 		return status;
@@ -288,15 +290,15 @@ int mausb_send_isoch_out_msg(struct mausb_device *ma_dev,
 			     struct mausb_event *mausb_event,
 			     struct mausb_urb_ctx *urb_ctx)
 {
-	uint32_t   starting_segments = 0;
-	uint32_t   rem_transfer_buf  = MAX_ISOCH_ASAP_PACKET_SIZE;
+	u32   starting_segments = 0;
+	u32   rem_transfer_buf  = MAX_ISOCH_ASAP_PACKET_SIZE;
 	struct urb *urb = (struct urb *)mausb_event->data.urb;
-	uint32_t number_of_packets = urb->number_of_packets;
-	uint32_t payload_size	   = 0;
-	uint32_t chunk_size	   = 0;
-	uint32_t seq_n		   = 0;
-	int status = 0;
-	int i	   = 0;
+	u32 number_of_packets = (u32)urb->number_of_packets;
+	u32 payload_size   = 0;
+	u32 chunk_size;
+	u32 seq_n	   = 0;
+	int status;
+	u32 i;
 
 	for (i = 0; i < number_of_packets; ++i) {
 		if (i < number_of_packets - 1)
@@ -307,34 +309,32 @@ int mausb_send_isoch_out_msg(struct mausb_device *ma_dev,
 				mausb_data_iterator_length(&urb_ctx->iterator) -
 						urb->iso_frame_desc[i].offset;
 
-		if (chunk_size + ISOCH_STANDARD_FORMAT_SIZE >
-							rem_transfer_buf) {
+		if (chunk_size + MAUSB_ISOCH_STANDARD_FORMAT_SIZE >
+		    rem_transfer_buf) {
 			if (payload_size == 0) {
 				mausb_pr_warn("Fragmentation");
 			} else {
-				status = __mausb_send_isoch_out_packet(ma_dev,
-						mausb_event, urb_ctx, &seq_n,
-						&starting_segments,
-						&rem_transfer_buf,
-						&payload_size, i);
+				status = __mausb_send_isoch_out_packet
+						(ma_dev, mausb_event, urb_ctx,
+						 &seq_n, &starting_segments,
+						 &rem_transfer_buf,
+						 &payload_size, i);
 				if (status < 0)
 					return status;
 				i--;
 				continue;
 			}
 		} else {
-			rem_transfer_buf -= chunk_size +
-					     ISOCH_STANDARD_FORMAT_SIZE;
+			rem_transfer_buf -=
+				chunk_size + MAUSB_ISOCH_STANDARD_FORMAT_SIZE;
 			payload_size += chunk_size;
 		}
 
 		if (i == number_of_packets - 1 || rem_transfer_buf == 0) {
-
-			status = __mausb_send_isoch_out_packet(ma_dev,
-					mausb_event, urb_ctx, &seq_n,
-					&starting_segments,
-					&rem_transfer_buf, &payload_size,
-					i + 1);
+			status = __mausb_send_isoch_out_packet
+					(ma_dev, mausb_event, urb_ctx, &seq_n,
+					 &starting_segments, &rem_transfer_buf,
+					 &payload_size, i + 1);
 			if (status < 0)
 				return status;
 		}
@@ -342,12 +342,11 @@ int mausb_send_isoch_out_msg(struct mausb_device *ma_dev,
 	return 0;
 }
 
-int mausb_receive_isoch_out(struct mausb_device *dev, struct mausb_event *event,
-			    struct mausb_urb_ctx *urb_ctx)
+int mausb_receive_isoch_out(struct mausb_event *event)
 {
 	struct urb *urb = (struct urb *)event->data.urb;
 	int status = 0;
-	uint16_t i;
+	u16 i;
 
 	mausb_pr_debug("transfer_size=%d, rem_transfer_size=%d, status=%d",
 		       event->data.transfer_size, event->data.rem_transfer_size,

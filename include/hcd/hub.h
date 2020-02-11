@@ -14,8 +14,6 @@
 
 #include "utils/mausb_data_iterator.h"
 
-static const char driver_name[] = "MA-USB host controller";
-
 #define PORT_C_MASK \
 		((USB_PORT_STAT_C_CONNECTION \
 		| USB_PORT_STAT_C_ENABLE \
@@ -76,16 +74,16 @@ static const char driver_name[] = "MA-USB host controller";
 #define DEV_HANDLE_NOT_ASSIGNED	-1
 
 struct mausb_usb_device_ctx {
-	int32_t		dev_handle;
+	s32		dev_handle;
 	bool		addressed;
 	void		*dev_addr;
 	struct rb_node	rb_node;
 };
 
 struct mausb_endpoint_ctx {
-	uint16_t ep_handle;
-	uint16_t dev_handle;
-	void	 *ma_dev;
+	u16	ep_handle;
+	u16	dev_handle;
+	void	*ma_dev;
 	struct mausb_usb_device_ctx *usb_device_ctx;
 };
 
@@ -97,8 +95,7 @@ struct mausb_urb_ctx {
 };
 
 int mausb_probe(struct device *dev);
-void mausb_hcd_urb_complete(struct urb *urb, uint32_t actual_length,
-			    int status);
+void mausb_hcd_urb_complete(struct urb *urb, u32 actual_length, int status);
 
 #ifdef ISOCH_CALLBACKS
 int mausb_sec_event_ring_setup(struct usb_hcd *hcd, unsigned int intr_num);
@@ -113,8 +110,6 @@ phys_addr_t mausb_get_xfer_ring_phys_addr(struct usb_hcd *hcd,
 int mausb_get_core_id(struct usb_hcd *hcd);
 #endif /* ISOCH_CALLBACKS */
 
-void mausb_clear_hcd_madev(uint16_t port_number);
-
+void mausb_clear_hcd_madev(u16 port_number);
 
 #endif /* __MAUSB_HCD_HUB_H__ */
-

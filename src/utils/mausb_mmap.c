@@ -26,20 +26,20 @@
 #define MAUSB_KERNEL_DEV_NAME "mausb_host"
 #define MAUSB_READ_DEVICE_TIMEOUT_MS 500
 
-static int mausb_major_kernel = -1;
+static dev_t mausb_major_kernel;
 static struct cdev  mausb_kernel_dev;
 static struct class *mausb_kernel_class;
 
 static void mausb_vm_open(struct vm_area_struct *vma)
 {
-	mausb_pr_info("");
+	mausb_pr_debug("");
 }
 
 static void mausb_vm_close(struct vm_area_struct *vma)
 {
 	struct mausb_ring_buffer *buffer = NULL, *next = NULL;
 	unsigned long flags = 0;
-	uint64_t ring_buffer_id = *(uint64_t *)(vma->vm_private_data);
+	u64 ring_buffer_id = *(u64 *)(vma->vm_private_data);
 
 	mausb_pr_info("Releasing ring buffer with id: %llu", ring_buffer_id);
 	spin_lock_irqsave(&mss.lock, flags);
@@ -67,7 +67,7 @@ static int mausb_vm_fault(struct vm_fault *vmf)
 static int mausb_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 #endif
 {
-	mausb_pr_info("");
+	mausb_pr_debug("");
 	return 0;
 }
 
@@ -79,8 +79,6 @@ static const struct vm_operations_struct mausb_vm_ops = {
 
 static int mausb_file_open(struct inode *inode, struct file *filp)
 {
-	mausb_pr_info("");
-
 	filp->private_data = NULL;
 
 	return 0;
@@ -88,8 +86,6 @@ static int mausb_file_open(struct inode *inode, struct file *filp)
 
 static int mausb_file_close(struct inode *inode, struct file *filp)
 {
-	mausb_pr_info("");
-
 	kfree(filp->private_data);
 	filp->private_data = NULL;
 
@@ -97,26 +93,28 @@ static int mausb_file_close(struct inode *inode, struct file *filp)
 }
 
 static ssize_t mausb_file_read(struct file *filp, char __user *user_buffer,
-			size_t size, loff_t *offset)
+			       size_t size, loff_t *offset)
 {
 	ssize_t num_of_bytes_to_read = MAUSB_MAX_NUM_OF_MA_DEVS *
 				       sizeof(struct mausb_events_notification);
-	unsigned long num_of_bytes_not_copied = 0;
-	int completed_events = 0;
-	int ring_events	     = 0;
+	unsigned long num_of_bytes_not_copied;
+	int completed_events;
+	int ring_events;
 	struct mausb_ring_buffer *ring_buffer;
-	struct mausb_device	 *dev = NULL;
-	unsigned long flags	= 0;
-	uint8_t current_device	= 0;
-	int status = 0;
-	int8_t fail_ret_val = 0;
+	struct mausb_device	 *dev;
+	struct completion	 *ring_has_events;
+	u8 current_device = 0;
+	s8 fail_ret_val;
+	unsigned long flags;
+	unsigned long timeout;
+	long status;
 
 	/* Reset heartbeat timer events */
 	mausb_reset_heartbeat_cnt();
 
-	if (size != num_of_bytes_to_read) {
+	if ((ssize_t)size != num_of_bytes_to_read) {
 		mausb_pr_alert("Different expected bytes to read (%ld) from actual size (%ld)",
-				num_of_bytes_to_read, size);
+			       num_of_bytes_to_read, size);
 		fail_ret_val = MAUSB_DRIVER_BAD_READ_BUFFER_SIZE;
 		if (copy_to_user(user_buffer, &fail_ret_val,
 				 sizeof(fail_ret_val)) != 0) {
@@ -136,11 +134,11 @@ static ssize_t mausb_file_read(struct file *filp, char __user *user_buffer,
 		return MAUSB_DRIVER_READ_ERROR;
 	}
 
-	status = wait_for_completion_interruptible_timeout(
-				&mss.rings_events.mausb_ring_has_events,
-				msecs_to_jiffies(MAUSB_READ_DEVICE_TIMEOUT_MS));
-
-	reinit_completion(&mss.rings_events.mausb_ring_has_events);
+	ring_has_events = &mss.rings_events.mausb_ring_has_events;
+	timeout = msecs_to_jiffies(MAUSB_READ_DEVICE_TIMEOUT_MS);
+	status = wait_for_completion_interruptible_timeout(ring_has_events,
+							   timeout);
+	reinit_completion(ring_has_events);
 
 	if (atomic_read(&mss.rings_events.mausb_stop_reading_ring_events)) {
 		mausb_pr_alert("Ring events stopped");
@@ -161,27 +159,25 @@ static ssize_t mausb_file_read(struct file *filp, char __user *user_buffer,
 	list_for_each_entry(dev, &mss.madev_list, list_entry) {
 		mss.events[current_device].madev_addr = dev->madev_addr;
 		ring_buffer = dev->ring_buffer;
-		ring_events = atomic_xchg(&ring_buffer->mausb_ring_events,
-					  ring_events);
-		completed_events = atomic_xchg(
-				&ring_buffer->mausb_completed_user_events,
-				completed_events);
-		mss.events[current_device].num_of_events = ring_events;
+		ring_events = atomic_xchg(&ring_buffer->mausb_ring_events, 0);
+		completed_events =
+			atomic_xchg(&ring_buffer->mausb_completed_user_events,
+				    0);
+		mss.events[current_device].num_of_events = (u16)ring_events;
 		mss.events[current_device].num_of_completed_events =
-							   completed_events;
-		completed_events = 0;
-		ring_events = 0;
+				(u16)completed_events;
 		if (++current_device == MAUSB_MAX_NUM_OF_MA_DEVS)
 			break;
 	}
 
 	spin_unlock_irqrestore(&mss.lock, flags);
 
-	num_of_bytes_to_read = current_device *
-			       sizeof(struct mausb_events_notification);
-
-	num_of_bytes_not_copied = copy_to_user(user_buffer, &mss.events,
-					       num_of_bytes_to_read);
+	num_of_bytes_to_read =
+		(ssize_t)(current_device *
+			  sizeof(struct mausb_events_notification));
+	num_of_bytes_not_copied =
+		copy_to_user(user_buffer, &mss.events,
+			     (unsigned long)num_of_bytes_to_read);
 
 	mausb_pr_debug("num_of_bytes_not_copied %ld, num_of_bytes_to_read %ld",
 		       num_of_bytes_not_copied, num_of_bytes_to_read);
@@ -198,67 +194,104 @@ static ssize_t mausb_file_read(struct file *filp, char __user *user_buffer,
 	return num_of_bytes_to_read;
 }
 
+static ssize_t mausb_file_write(struct file *filp, const char __user *buffer,
+				size_t size, loff_t *offset)
+{
+	ssize_t num_of_bytes_to_write =
+				sizeof(struct mausb_events_notification);
+	struct mausb_events_notification notification;
+	unsigned long flags;
+	struct mausb_device *dev;
+
+	if (size != (size_t)num_of_bytes_to_write) {
+		mausb_pr_alert("Different expected bytes to write (%ld) from actual size (%ld)",
+			       num_of_bytes_to_write, size);
+		return MAUSB_DRIVER_WRITE_ERROR;
+	}
+
+	copy_from_user(&notification, buffer, size);
+
+	spin_lock_irqsave(&mss.lock, flags);
+	dev = mausb_get_dev_from_addr_unsafe(notification.madev_addr);
+
+	if (!dev) {
+		spin_unlock_irqrestore(&mss.lock, flags);
+		return 0;
+	}
+
+	spin_lock_irqsave(&dev->num_of_user_events_lock, flags);
+	dev->num_of_user_events += notification.num_of_events;
+	dev->num_of_completed_events += notification.num_of_completed_events;
+	spin_unlock_irqrestore(&dev->num_of_user_events_lock, flags);
+
+	queue_work(dev->workq, &dev->work);
+	spin_unlock_irqrestore(&mss.lock, flags);
+
+	return num_of_bytes_to_write;
+}
+
+static inline unsigned long mausb_ring_buffer_length(void)
+{
+	int page_order = mausb_get_page_order(2 * MAUSB_RING_BUFFER_SIZE,
+					      sizeof(struct mausb_event));
+	return PAGE_SIZE << page_order;
+}
+
 static int mausb_mmap(struct file *filp, struct vm_area_struct *vma)
 {
 	unsigned long size = vma->vm_end - vma->vm_start;
 	int ret;
 	struct page *page = NULL;
-	int status = 0;
 	unsigned long flags = 0;
 	struct mausb_ring_buffer *ring_buffer = kzalloc(sizeof(*ring_buffer),
 							GFP_KERNEL);
-
 	if (!ring_buffer)
 		return -ENOMEM;
 
-	status = mausb_ring_buffer_init(ring_buffer);
-	if (status < 0) {
+	ret = mausb_ring_buffer_init(ring_buffer);
+	if (ret < 0) {
 		mausb_pr_err("Ring buffer init failed");
-		mausb_ring_buffer_destroy(ring_buffer);
-		kfree(ring_buffer);
-		return -ENOMEM;
+		goto release_ring_buffer;
 	}
 
 	vma->vm_private_data = kzalloc(sizeof(ring_buffer->id), GFP_KERNEL);
 	if (!vma->vm_private_data) {
-		mausb_pr_err("Failed to allocate private data");
-		mausb_ring_buffer_destroy(ring_buffer);
-		kfree(ring_buffer);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto release_ring_buffer;
 	}
 
 	filp->private_data = vma->vm_private_data;
 
-	mausb_pr_debug("");
+	if (size > mausb_ring_buffer_length()) {
+		mausb_pr_err("Invalid memory size to map");
+		ret = -EINVAL;
+		goto release_ring_buffer;
+	}
+
 	vma->vm_ops = &mausb_vm_ops;
 	mausb_vm_open(vma);
 
 	page = virt_to_page(ring_buffer->to_user_buffer);
-
-	if (size > (2 * MAUSB_RING_BUFFER_SIZE * sizeof(struct mausb_event))) {
-		mausb_pr_err("Invalid memory size to map");
-		mausb_ring_buffer_destroy(ring_buffer);
-		kfree(ring_buffer);
-		return -EINVAL;
-	}
-
 	ret = remap_pfn_range(vma, vma->vm_start, page_to_pfn(page), size,
 			      vma->vm_page_prot);
 	if (ret < 0) {
 		mausb_pr_err("Could not map the address area");
-		mausb_ring_buffer_destroy(ring_buffer);
-		kfree(ring_buffer);
-		return ret;
+		goto release_ring_buffer;
 	}
 
 	spin_lock_irqsave(&mss.lock, flags);
 	ring_buffer->id = mss.ring_buffer_id++;
-	*(uint64_t *)(vma->vm_private_data) = ring_buffer->id;
+	*(u64 *)(vma->vm_private_data) = ring_buffer->id;
 	list_add_tail(&ring_buffer->list_entry, &mss.available_ring_buffers);
 	mausb_pr_info("Allocated ring buffer with id: %llu", ring_buffer->id);
 	spin_unlock_irqrestore(&mss.lock, flags);
 
 	return 0;
+
+release_ring_buffer:
+	mausb_ring_buffer_destroy(ring_buffer);
+	kfree(ring_buffer);
+	return ret;
 }
 
 static char *mausb_kernel_devnode(struct device *dev, umode_t *mode)
@@ -273,24 +306,20 @@ static const struct file_operations mausb_file_ops = {
 	.open	 = mausb_file_open,
 	.release = mausb_file_close,
 	.read	 = mausb_file_read,
+	.write   = mausb_file_write,
 	.mmap	 = mausb_mmap,
 };
 
 int mausb_create_dev(void)
 {
 	int device_created = 0;
-	int status = 0;
-
-	mausb_pr_info("");
-
-	/* cat /proc/devices */
-	status = alloc_chrdev_region(&mausb_major_kernel, 0, 1,
-				MAUSB_KERNEL_DEV_NAME "_proc");
+	int status = alloc_chrdev_region(&mausb_major_kernel, 0, 1,
+					 MAUSB_KERNEL_DEV_NAME "_proc");
 	if (status)
 		goto cleanup;
-	/* ls /sys/class */
-	mausb_kernel_class =
-		class_create(THIS_MODULE, MAUSB_KERNEL_DEV_NAME "_sys");
+
+	mausb_kernel_class = class_create(THIS_MODULE,
+					  MAUSB_KERNEL_DEV_NAME "_sys");
 	if (!mausb_kernel_class) {
 		status = -ENOMEM;
 		goto cleanup;
@@ -299,7 +328,7 @@ int mausb_create_dev(void)
 	mausb_kernel_class->devnode = mausb_kernel_devnode;
 
 	if (!device_create(mausb_kernel_class, NULL, mausb_major_kernel, NULL,
-			MAUSB_KERNEL_DEV_NAME "_dev")) {
+			   MAUSB_KERNEL_DEV_NAME "_dev")) {
 		status = -ENOMEM;
 		goto cleanup;
 	}
@@ -316,8 +345,6 @@ cleanup:
 
 void mausb_cleanup_dev(int device_created)
 {
-	mausb_pr_info("Enter");
-
 	if (device_created) {
 		device_destroy(mausb_kernel_class, mausb_major_kernel);
 		mausb_pr_info("device destroyed");
@@ -328,21 +355,18 @@ void mausb_cleanup_dev(int device_created)
 		class_destroy(mausb_kernel_class);
 		mausb_pr_info("class destroyed");
 	}
-	if (mausb_major_kernel != -1) {
-		unregister_chrdev_region(mausb_major_kernel, 1);
-		mausb_pr_info("unregistered");
-	}
-	mausb_pr_info("Exit");
+
+	unregister_chrdev_region(mausb_major_kernel, 1);
+	mausb_pr_info("unregistered");
 }
 
 void mausb_notify_completed_user_events(struct mausb_ring_buffer *ring_buffer)
 {
 	int completed;
 
-	completed = atomic_inc_return(
-				&ring_buffer->mausb_completed_user_events);
-	mausb_pr_debug("mausb_completed_user_events INCREMENTED %d",
-			completed);
+	completed =
+		atomic_inc_return(&ring_buffer->mausb_completed_user_events);
+	mausb_pr_debug("mausb_completed_user_events INCREMENTED %d", completed);
 	if (completed > MAUSB_RING_BUFFER_SIZE / 16)
 		complete(&mss.rings_events.mausb_ring_has_events);
 }
@@ -358,7 +382,6 @@ void mausb_notify_ring_events(struct mausb_ring_buffer *ring_buffer)
 
 void mausb_stop_ring_events(void)
 {
-	mausb_pr_info("");
 	atomic_set(&mss.rings_events.mausb_stop_reading_ring_events, 1);
 	complete(&mss.rings_events.mausb_ring_has_events);
 }

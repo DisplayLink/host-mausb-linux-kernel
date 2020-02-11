@@ -12,7 +12,7 @@
 #ifdef MAUSB_WITH_LOGS
 #include <linux/sched.h>
 #define mausb_pr_logs(level_str, level, log, ...)\
-	pr_##level_str("MAUSB "#level" [%x:%x] [%s] "log"\n",\
+	pr_##level_str("MAUSB " #level " [%x:%x] [%s] " log "\n",\
 	current->pid, current->tgid, __func__, ##__VA_ARGS__)
 #else
 #define mausb_pr_logs(...)

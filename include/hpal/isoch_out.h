@@ -15,7 +15,6 @@
 int mausb_send_isoch_out_msg(struct mausb_device *ma_dev,
 			     struct mausb_event *mausb_event,
 			     struct mausb_urb_ctx *urb_ctx);
-int mausb_receive_isoch_out(struct mausb_device *dev, struct mausb_event *event,
-			    struct mausb_urb_ctx *urb_ctx);
+int mausb_receive_isoch_out(struct mausb_event *event);
 
 #endif /* __MAUSB_HPAL_ISOCH_OUT_H__ */

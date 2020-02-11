@@ -16,7 +16,7 @@
 
 int mausb_send_out_data_msg(struct mausb_device *dev, struct mausb_event *event,
 			    struct mausb_urb_ctx *urb_ctx);
-int mausb_receive_out_data(struct mausb_device *dev, struct mausb_event *event,
-			   struct mausb_urb_ctx *urb_ctx);
+void mausb_receive_out_data(struct mausb_event *event,
+			    struct mausb_urb_ctx *urb_ctx);
 
 #endif /* __MAUSB_HPAL_DATA_OUT_H__ */

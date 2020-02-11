@@ -7,7 +7,7 @@
 #
 
 config HOST_MAUSB
-	bool "MA-USB Host Driver"
+	tristate "MA-USB Host Driver"
 	depends on USB=y
 	default y
 	help

@@ -34,33 +34,31 @@ enum mausb_channel {
 
 struct mausb_kvec_data_wrapper {
 	struct kvec *kvec;
-	uint32_t    kvec_num;
-	uint32_t    length;
+	u32    kvec_num;
+	u32    length;
 };
 
 struct mausb_ip_recv_ctx {
-	uint16_t left;
-	uint16_t received;
-	char	 *buffer;
-	char	 common_hdr[12]
-		 __aligned(4);
+	u16  left;
+	u16  received;
+	char *buffer;
+	char common_hdr[12] __aligned(4);
 };
 
 struct mausb_ip_ctx {
 	struct socket *client_socket;
 	struct net    *net_ns;
 	char	      ip_addr[INET6_ADDRSTRLEN];
-	uint16_t      port;
+	u16	      port;
 	bool	      udp;
-	/* IPV6 support */
 
 	/* Queues to schedule rx work */
 	struct workqueue_struct	*recv_workq;
 	struct workqueue_struct	*connect_workq;
 	struct work_struct	recv_work;
 	struct work_struct	connect_work;
-	/* recv buffer */
-	struct mausb_ip_recv_ctx recv_ctx;
+
+	struct mausb_ip_recv_ctx recv_ctx; /* recv buffer */
 
 	enum mausb_channel channel;
 	void *ctx;
@@ -72,7 +70,7 @@ struct mausb_ip_ctx {
 int mausb_init_ip_ctx(struct mausb_ip_ctx **ip_ctx,
 		      struct net *net_ns,
 		      char ip_addr[INET6_ADDRSTRLEN],
-		      uint16_t port,
+		      u16 port,
 		      void *ctx,
 		      void (*ctx_callback)(void *ctx,
 					   enum mausb_channel channel,

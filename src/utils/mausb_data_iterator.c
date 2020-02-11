@@ -16,12 +16,12 @@
 #include "utils/mausb_logs.h"
 
 static int mausb_read_virtual_buffer(struct mausb_data_iter *iterator,
-				     uint32_t byte_num,
+				     u32 byte_num,
 				     struct list_head *data_chunks_list,
-				     uint32_t *data_chunks_num)
+				     u32 *data_chunks_num)
 {
-	uint32_t rem_data	= 0;
-	uint32_t bytes_to_read	= 0;
+	u32 rem_data		= 0;
+	u32 bytes_to_read	= 0;
 	struct mausb_payload_chunk *data_chunk = NULL;
 
 	(*data_chunks_num) = 0;
@@ -43,21 +43,21 @@ static int mausb_read_virtual_buffer(struct mausb_data_iter *iterator,
 
 	++(*data_chunks_num);
 
-	data_chunk->kvec.iov_base = (uint8_t *) (iterator->buffer) +
-		iterator->offset;
+	data_chunk->kvec.iov_base = (u8 *)(iterator->buffer) + iterator->offset;
 	data_chunk->kvec.iov_len = bytes_to_read;
 	iterator->offset += bytes_to_read;
 
 	list_add_tail(&data_chunk->list_entry, data_chunks_list);
+
 	return 0;
 }
 
 static int mausb_read_scatterlist_buffer(struct mausb_data_iter *iterator,
-					 uint32_t byte_num,
+					 u32 byte_num,
 					 struct list_head *data_chunks_list,
-					 uint32_t *data_chunks_num)
+					 u32 *data_chunks_num)
 {
-	uint32_t current_sg_read_num = 0;
+	u32 current_sg_read_num;
 	struct mausb_payload_chunk *data_chunk = NULL;
 
 	(*data_chunks_num) = 0;
@@ -66,8 +66,8 @@ static int mausb_read_scatterlist_buffer(struct mausb_data_iter *iterator,
 		return -EINVAL;
 
 	INIT_LIST_HEAD(data_chunks_list);
-	while (byte_num) {
 
+	while (byte_num) {
 		if (iterator->sg_iter.consumed == iterator->sg_iter.length) {
 			if (!sg_miter_next(&iterator->sg_iter))
 				break;
@@ -80,11 +80,12 @@ static int mausb_read_scatterlist_buffer(struct mausb_data_iter *iterator,
 			return -ENOMEM;
 		}
 
-		current_sg_read_num = min((size_t) byte_num,
-			iterator->sg_iter.length - iterator->sg_iter.consumed);
+		current_sg_read_num = min((size_t)byte_num,
+					  iterator->sg_iter.length -
+					  iterator->sg_iter.consumed);
 
-		data_chunk->kvec.iov_base = (uint8_t *) iterator->sg_iter.addr +
-					     iterator->sg_iter.consumed;
+		data_chunk->kvec.iov_base = (u8 *)iterator->sg_iter.addr +
+				iterator->sg_iter.consumed;
 		data_chunk->kvec.iov_len  = current_sg_read_num;
 
 		++(*data_chunks_num);
@@ -98,12 +99,11 @@ static int mausb_read_scatterlist_buffer(struct mausb_data_iter *iterator,
 	return 0;
 }
 
-static uint32_t mausb_write_virtual_buffer(struct mausb_data_iter *iterator,
-					   void *buffer, uint32_t size)
+static u32 mausb_write_virtual_buffer(struct mausb_data_iter *iterator,
+				      void *buffer, u32 size)
 {
-
-	uint32_t rem_space   = 0;
-	uint32_t write_count = 0;
+	u32 rem_space   = 0;
+	u32 write_count = 0;
 
 	if (!buffer || !size)
 		return write_count;
@@ -121,27 +121,26 @@ static uint32_t mausb_write_virtual_buffer(struct mausb_data_iter *iterator,
 	return write_count;
 }
 
-static uint32_t mausb_write_scatterlist_buffer(struct mausb_data_iter *iterator,
-					       void *buffer, uint32_t size)
+static u32 mausb_write_scatterlist_buffer(struct mausb_data_iter *iterator,
+					  void *buffer, u32 size)
 {
-	uint32_t current_sg_rem_space = 0;
-	uint32_t count		      = 0;
-	uint32_t total_count	      = 0;
+	u32 current_sg_rem_space;
+	u32 count = 0;
+	u32 total_count = 0;
 	void *location = NULL;
 
 	if (!buffer || !size)
 		return count;
 
 	while (size) {
-
 		if (iterator->sg_iter.consumed >= iterator->sg_iter.length) {
 			if (!sg_miter_next(&iterator->sg_iter))
 				break;
 			iterator->sg_iter.consumed = 0;
 		}
 
-		current_sg_rem_space = iterator->sg_iter.length -
-		    iterator->sg_iter.consumed;
+		current_sg_rem_space = (u32)(iterator->sg_iter.length -
+			iterator->sg_iter.consumed);
 
 		count = min(size, current_sg_rem_space);
 		total_count += count;
@@ -157,13 +156,12 @@ static uint32_t mausb_write_scatterlist_buffer(struct mausb_data_iter *iterator,
 	}
 
 	return total_count;
-
 }
 
 int mausb_data_iterator_read(struct mausb_data_iter *iterator,
-			     uint32_t byte_num,
+			     u32 byte_num,
 			     struct list_head *data_chunks_list,
-			     uint32_t *data_chunks_num)
+			     u32 *data_chunks_num)
 {
 	if (iterator->buffer)
 		return mausb_read_virtual_buffer(iterator, byte_num,
@@ -173,34 +171,32 @@ int mausb_data_iterator_read(struct mausb_data_iter *iterator,
 		return mausb_read_scatterlist_buffer(iterator, byte_num,
 						     data_chunks_list,
 						     data_chunks_num);
-
 }
 
-uint32_t mausb_data_iterator_write(struct mausb_data_iter *iterator,
-				   void *buffer, uint32_t length)
+u32 mausb_data_iterator_write(struct mausb_data_iter *iterator, void *buffer,
+			      u32 length)
 {
 	if (iterator->buffer)
 		return mausb_write_virtual_buffer(iterator, buffer, length);
 	else
 		return mausb_write_scatterlist_buffer(iterator, buffer, length);
-
 }
 
 static inline void mausb_seek_virtual_buffer(struct mausb_data_iter *iterator,
-					     uint32_t seek_delta)
+					     u32 seek_delta)
 {
 	iterator->offset += min(seek_delta, iterator->length -
 					    iterator->offset);
 }
 
 static void mausb_seek_scatterlist_buffer(struct mausb_data_iter *iterator,
-					  uint32_t seek_delta)
+					  u32 seek_delta)
 {
-	uint32_t rem_bytes_in_current_scatter = 0;
+	u32 rem_bytes_in_current_scatter;
 
 	while (seek_delta) {
-		rem_bytes_in_current_scatter =
-		    iterator->sg_iter.length - iterator->sg_iter.consumed;
+		rem_bytes_in_current_scatter = (u32)(iterator->sg_iter.length -
+						iterator->sg_iter.consumed);
 		if (rem_bytes_in_current_scatter <= seek_delta) {
 			iterator->sg_iter.consumed +=
 			    rem_bytes_in_current_scatter;
@@ -216,7 +212,7 @@ static void mausb_seek_scatterlist_buffer(struct mausb_data_iter *iterator,
 }
 
 void mausb_data_iterator_seek(struct mausb_data_iter *iterator,
-			      uint32_t seek_delta)
+			      u32 seek_delta)
 {
 	if (iterator->buffer)
 		mausb_seek_virtual_buffer(iterator, seek_delta);
@@ -233,9 +229,9 @@ static void mausb_calculate_buffer_length(struct mausb_data_iter *iterator)
 	} else if (iterator->sg && iterator->num_sgs != 0) {
 		/* Transfer_buffer_length is not populated */
 		sg_miter_start(&iterator->sg_iter, iterator->sg,
-				iterator->num_sgs, iterator->flags);
+			       iterator->num_sgs, iterator->flags);
 		while (sg_miter_next(&iterator->sg_iter))
-			iterator->length += iterator->sg_iter.length;
+			iterator->length += (u32)iterator->sg_iter.length;
 		sg_miter_stop(&iterator->sg_iter);
 	} else {
 		iterator->length = 0;
@@ -243,8 +239,8 @@ static void mausb_calculate_buffer_length(struct mausb_data_iter *iterator)
 }
 
 void mausb_init_data_iterator(struct mausb_data_iter *iterator, void *buffer,
-			      uint32_t buffer_len, struct scatterlist *sg,
-			      uint32_t num_sgs, bool direction)
+			      u32 buffer_len, struct scatterlist *sg,
+			      unsigned int num_sgs, bool direction)
 {
 	iterator->offset = 0;
 	iterator->buffer     = buffer;
@@ -260,7 +256,7 @@ void mausb_init_data_iterator(struct mausb_data_iter *iterator, void *buffer,
 		/* Scatterlist provided */
 		iterator->flags = direction ? SG_MITER_TO_SG : SG_MITER_FROM_SG;
 		sg_miter_start(&iterator->sg_iter, sg, num_sgs,
-			iterator->flags);
+			       iterator->flags);
 		iterator->sg_started = 1;
 	}
 }
@@ -288,13 +284,12 @@ void mausb_reset_data_iterator(struct mausb_data_iter *iterator)
 
 	if (!iterator->buffer && iterator->sg && iterator->num_sgs != 0) {
 		sg_miter_start(&iterator->sg_iter, iterator->sg,
-			iterator->num_sgs, iterator->flags);
+			       iterator->num_sgs, iterator->flags);
 		iterator->sg_started = 1;
 	}
-
 }
 
-uint32_t mausb_data_iterator_length(struct mausb_data_iter *iterator)
+u32 mausb_data_iterator_length(struct mausb_data_iter *iterator)
 {
 	return iterator->length;
 }

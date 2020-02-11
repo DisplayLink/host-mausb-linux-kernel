@@ -28,30 +28,6 @@
 
 #define RESPONSE_TIMEOUT	5000
 
-struct mausb_hcd {
-	spinlock_t	lock;
-	struct device	*pdev;
-	uint16_t	connected_ports;
-
-	struct rb_root	mausb_urbs;
-	struct hub_ctx	*hcd_ss_ctx;
-	struct hub_ctx	*hcd_hs_ctx;
-	struct notifier_block power_state_listener;
-};
-
-struct mausb_dev {
-	uint32_t	port_status;
-	struct rb_root	usb_devices;
-	uint8_t		dev_speed;
-	void		*ma_dev;
-};
-
-struct hub_ctx {
-	struct mausb_hcd *mhcd;
-	struct usb_hcd	 *hcd;
-	struct mausb_dev ma_devs[NUMBER_OF_PORTS];
-};
-
 enum mausb_device_type {
 	USBDEVICE = 0,
 	USB20HUB  = 1,
@@ -66,7 +42,29 @@ enum mausb_device_speed {
 	SUPER_SPEED_PLUS = 4
 };
 
-extern struct mausb_hcd *mhcd;
+struct mausb_hcd {
+	spinlock_t	lock;	/* Protect HCD during URB processing */
+	struct device	*pdev;
+	u16		connected_ports;
+
+	struct rb_root	mausb_urbs;
+	struct hub_ctx	*hcd_ss_ctx;
+	struct hub_ctx	*hcd_hs_ctx;
+	struct notifier_block power_state_listener;
+};
+
+struct mausb_dev {
+	u32		port_status;
+	struct rb_root	usb_devices;
+	u8		dev_speed;
+	void		*ma_dev;
+};
+
+struct hub_ctx {
+	struct mausb_hcd *mhcd;
+	struct usb_hcd	 *hcd;
+	struct mausb_dev ma_devs[NUMBER_OF_PORTS];
+};
 
 int mausb_init_hcd(void);
 void mausb_deinit_hcd(void);
@@ -74,7 +72,7 @@ void mausb_deinit_hcd(void);
 void mausb_port_has_changed(const enum mausb_device_type device_type,
 			    const enum mausb_device_speed device_speed,
 			    void *ma_dev);
-void mausb_hcd_disconnect(const uint16_t port_number,
+void mausb_hcd_disconnect(const u16 port_number,
 			  const enum mausb_device_type device_type,
 			  const enum mausb_device_speed device_speed);
 

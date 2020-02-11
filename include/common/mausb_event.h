@@ -54,90 +54,90 @@
 #define MAUSB_DATA_MSG_CONTROL MAUSB_DATA_MSG_DIRECTION_OUT
 
 struct mausb_devhandle {
-	uint64_t event_id;
-	uint32_t route_string;
-	uint16_t hub_dev_handle;
-	uint16_t parent_hs_hub_dev_handle;
-	uint16_t parent_hs_hub_port;
-	uint16_t mtt;
+	u64 event_id;
+	u32 route_string;
+	u16 hub_dev_handle;
+	u16 parent_hs_hub_dev_handle;
+	u16 parent_hs_hub_port;
+	u16 mtt;
 	/* dev_handle assigned in user */
-	uint16_t dev_handle;
-	uint8_t  device_speed;
-	uint8_t  lse;
+	u16 dev_handle;
+	u8  device_speed;
+	u8  lse;
 };
 
 struct mausb_ephandle {
-	uint64_t event_id;
-	uint16_t device_handle;
-	uint16_t descriptor_size;
+	u64 event_id;
+	u16 device_handle;
+	u16 descriptor_size;
 	/* ep_handle assigned in user */
-	uint16_t ep_handle;
+	u16 ep_handle;
 	char	 descriptor[sizeof(struct ma_usb_ephandlereq_desc_ss)];
 };
 
 struct mausb_epactivate {
-	uint64_t event_id;
-	uint16_t device_handle;
-	uint16_t ep_handle;
+	u64 event_id;
+	u16 device_handle;
+	u16 ep_handle;
 };
 
 struct mausb_epinactivate {
-	uint64_t event_id;
-	uint16_t device_handle;
-	uint16_t ep_handle;
+	u64 event_id;
+	u16 device_handle;
+	u16 ep_handle;
 };
 
 struct mausb_epreset {
-	uint64_t event_id;
-	uint16_t device_handle;
-	uint16_t ep_handle;
-	uint8_t  tsp;
+	u64 event_id;
+	u16 device_handle;
+	u16 ep_handle;
+	u8  tsp;
 };
 
 struct mausb_epdelete {
-	uint64_t event_id;
-	uint16_t device_handle;
-	uint16_t ep_handle;
+	u64 event_id;
+	u16 device_handle;
+	u16 ep_handle;
 };
 
 struct mausb_updatedev {
-	uint64_t event_id;
-	uint16_t device_handle;
-	uint16_t max_exit_latency;
+	u64 event_id;
+	u16 device_handle;
+	u16 max_exit_latency;
 	struct ma_usb_updatedevreq_desc update_descriptor;
-	uint8_t  hub;
-	uint8_t  number_of_ports;
-	uint8_t  mtt;
-	uint8_t  ttt;
-	uint8_t  integrated_hub_latency;
+	u8  hub;
+	u8  number_of_ports;
+	u8  mtt;
+	u8  ttt;
+	u8  integrated_hub_latency;
 };
 
 struct mausb_usbdevreset {
-	uint64_t event_id;
-	uint16_t device_handle;
+	u64 event_id;
+	u16 device_handle;
 };
 
 struct mausb_modifyep0 {
-	uint64_t event_id;
-	uint16_t device_handle;
-	uint16_t ep_handle;
-	uint16_t max_packet_size;
+	u64 event_id;
+	u16 device_handle;
+	u16 ep_handle;
+	__le16 max_packet_size;
 };
 
 struct mausb_setusbdevaddress {
-	uint64_t event_id;
-	uint16_t device_handle;
-	uint16_t response_timeout;
+	u64 event_id;
+	u16 device_handle;
+	u16 response_timeout;
 };
 
 struct mausb_usbdevdisconnect {
-	uint16_t device_handle;
+	u16 device_handle;
 };
 
 struct mausb_canceltransfer {
-	uint64_t urb;
-	uint16_t device_handle;
-	uint16_t ep_handle;
+	u64 urb;
+	u16 device_handle;
+	u16 ep_handle;
 };
 
 struct mausb_mgmt_hdr {
@@ -145,12 +145,12 @@ struct mausb_mgmt_hdr {
 };
 
 struct mausb_mgmt_req_timedout {
-	uint64_t event_id;
+	u64 event_id;
 };
 
 struct mausb_delete_ma_dev {
-	uint64_t event_id;
-	uint16_t device_id;
+	u64 event_id;
+	u16 device_id;
 };
 
 /* TODO split mgmt_event to generic send mgmt req and specific requests */
@@ -175,37 +175,37 @@ struct mausb_mgmt_event {
 };
 
 struct mausb_data_event {
-	uint64_t urb;
-	uint64_t recv_buf;
-	uint32_t iterator_seek_delta;
-	uint32_t transfer_size;
-	uint32_t rem_transfer_size;
-	uint32_t transfer_flags;
-	uint32_t isoch_seg_num;
-	uint32_t req_id;
-	uint32_t payload_size;
-	int32_t  status;
+	u64 urb;
+	u64 recv_buf;
+	u32 iterator_seek_delta;
+	u32 transfer_size;
+	u32 rem_transfer_size;
+	u32 transfer_flags;
+	u32 isoch_seg_num;
+	u32 req_id;
+	u32 payload_size;
+	s32 status;
 
 	__aligned(4) char hdr[MAUSB_TRANSFER_HDR_SIZE];
 	__aligned(4) char hdr_ack[MAUSB_TRANSFER_HDR_SIZE];
 
-	uint16_t device_id;
-	uint16_t ep_handle;
-	uint16_t packet_size;
-	uint8_t  setup_packet;
-	uint8_t  direction;
-	uint8_t  transfer_type;
-	uint8_t  first_control_packet;
-	uint8_t  transfer_eot;
-	uint8_t  mausb_address;
-	uint8_t  mausb_ssid;
+	u16 device_id;
+	u16 ep_handle;
+	u16 packet_size;
+	u8  setup_packet;
+	u8  direction;
+	u8  transfer_type;
+	u8  first_control_packet;
+	u8  transfer_eot;
+	u8  mausb_address;
+	u8  mausb_ssid;
 };
 
 struct mausb_port_changed_event {
-	uint8_t port;
-	uint8_t dev_type;
-	uint8_t dev_speed;
-	uint8_t lse;
+	u8 port;
+	u8 dev_type;
+	u8 dev_speed;
+	u8 lse;
 };
 
 struct mausb_event {
@@ -214,15 +214,15 @@ struct mausb_event {
 		struct mausb_data_event		data;
 		struct mausb_port_changed_event port_changed;
 	};
-	int32_t status;
-	uint8_t type;
-	uint8_t madev_addr;
+	s32 status;
+	u8 type;
+	u8 madev_addr;
 };
 
 struct mausb_events_notification {
-	uint16_t num_of_events;
-	uint16_t num_of_completed_events;
-	uint8_t  madev_addr;
+	u16 num_of_events;
+	u16 num_of_completed_events;
+	u8  madev_addr;
 };
 
 #endif /* __MAUSB_COMMON_MAUSB_EVENT_H__ */

@@ -22,7 +22,106 @@
 #include "hpal/mausb_events.h"
 #include "utils/mausb_logs.h"
 
-static void mausb_cleanup_ring_buffer_event(struct mausb_event *event)
+static int mausb_ring_buffer_get(struct mausb_ring_buffer *ring,
+				 struct mausb_event *event)
+{
+	unsigned long flags = 0;
+
+	spin_lock_irqsave(&ring->lock, flags);
+	if (CIRC_CNT(ring->head, ring->tail, MAUSB_RING_BUFFER_SIZE) < 1) {
+		spin_unlock_irqrestore(&ring->lock, flags);
+		return -ENOSPC;
+	}
+	memcpy(event, ring->to_user_buffer + ring->tail, sizeof(*event));
+	mausb_pr_debug("HEAD=%d, TAIL=%d", ring->head, ring->tail);
+	ring->tail = (ring->tail + 1) & (MAUSB_RING_BUFFER_SIZE - 1);
+	mausb_pr_debug("HEAD=%d, TAIL=%d", ring->head, ring->tail);
+	spin_unlock_irqrestore(&ring->lock, flags);
+	return 0;
+}
+
+int mausb_ring_buffer_init(struct mausb_ring_buffer *ring)
+{
+	unsigned int page_order =
+		mausb_get_page_order(2 * MAUSB_RING_BUFFER_SIZE,
+				     sizeof(struct mausb_event));
+	ring->to_user_buffer =
+		(struct mausb_event *)__get_free_pages(GFP_KERNEL, page_order);
+	if (!ring->to_user_buffer)
+		return -ENOMEM;
+	ring->from_user_buffer = ring->to_user_buffer + MAUSB_RING_BUFFER_SIZE;
+	ring->head = 0;
+	ring->tail = 0;
+	ring->current_from_user = 0;
+	ring->buffer_full = false;
+	spin_lock_init(&ring->lock);
+
+	return 0;
+}
+
+int mausb_ring_buffer_put(struct mausb_ring_buffer *ring,
+			  struct mausb_event *event)
+{
+	unsigned long flags = 0;
+
+	spin_lock_irqsave(&ring->lock, flags);
+
+	if (ring->buffer_full) {
+		mausb_pr_err("Ring buffer is full");
+		spin_unlock_irqrestore(&ring->lock, flags);
+		return -ENOSPC;
+	}
+
+	if (CIRC_SPACE(ring->head, ring->tail, MAUSB_RING_BUFFER_SIZE) < 2) {
+		mausb_pr_err("Ring buffer capacity exceeded, disconnecting device");
+		ring->buffer_full = true;
+		mausb_disconect_event_unsafe(ring, event->madev_addr);
+		ring->head = (ring->head + 1) & (MAUSB_RING_BUFFER_SIZE - 1);
+		spin_unlock_irqrestore(&ring->lock, flags);
+		return -ENOSPC;
+	}
+	memcpy(ring->to_user_buffer + ring->head, event, sizeof(*event));
+	mausb_pr_debug("HEAD=%d, TAIL=%d", ring->head, ring->tail);
+	ring->head = (ring->head + 1) & (MAUSB_RING_BUFFER_SIZE - 1);
+	mausb_pr_debug("HEAD=%d, TAIL=%d", ring->head, ring->tail);
+	spin_unlock_irqrestore(&ring->lock, flags);
+	return 0;
+}
+
+int mausb_ring_buffer_move_tail(struct mausb_ring_buffer *ring, u32 count)
+{
+	unsigned long flags = 0;
+
+	spin_lock_irqsave(&ring->lock, flags);
+	if (CIRC_CNT(ring->head, ring->tail, MAUSB_RING_BUFFER_SIZE) < count) {
+		spin_unlock_irqrestore(&ring->lock, flags);
+		return -ENOSPC;
+	}
+	mausb_pr_debug("old HEAD=%d, TAIL=%d", ring->head, ring->tail);
+	ring->tail = (ring->tail + (int)count) & (MAUSB_RING_BUFFER_SIZE - 1);
+	mausb_pr_debug("new HEAD=%d, TAIL=%d", ring->head, ring->tail);
+	spin_unlock_irqrestore(&ring->lock, flags);
+	return 0;
+}
+
+void mausb_ring_buffer_cleanup(struct mausb_ring_buffer *ring)
+{
+	struct mausb_event event;
+
+	while (mausb_ring_buffer_get(ring, &event) == 0)
+		mausb_cleanup_ring_buffer_event(&event);
+}
+
+void mausb_ring_buffer_destroy(struct mausb_ring_buffer *ring)
+{
+	unsigned int page_order =
+		mausb_get_page_order(2 * MAUSB_RING_BUFFER_SIZE,
+				     sizeof(struct mausb_event));
+	if (ring && ring->to_user_buffer)
+		free_pages((unsigned long)ring->to_user_buffer, page_order);
+}
+
+void mausb_cleanup_ring_buffer_event(struct mausb_event *event)
 {
 	mausb_pr_debug("event=%d", event->type);
 	switch (event->type) {
@@ -43,98 +142,27 @@ static void mausb_cleanup_ring_buffer_event(struct mausb_event *event)
 	}
 }
 
-static int mausb_get_page_order(unsigned int num_of_elems,
-				unsigned int elem_size)
+void mausb_disconect_event_unsafe(struct mausb_ring_buffer *ring,
+				  uint8_t madev_addr)
 {
-	unsigned int num_of_pages = DIV_ROUND_UP(
-					num_of_elems * elem_size, PAGE_SIZE);
-	unsigned int order = ilog2(num_of_pages) +
-			     (is_power_of_2(num_of_pages) ? 0 : 1);
-	return order;
-}
+	struct mausb_event disconnect_event;
+	struct mausb_device *dev = mausb_get_dev_from_addr_unsafe(madev_addr);
 
-int mausb_ring_buffer_init(struct mausb_ring_buffer *ring)
-{
-	int page_order = mausb_get_page_order(2 * MAUSB_RING_BUFFER_SIZE,
-					sizeof(struct mausb_event));
-	ring->to_user_buffer =
-		(struct mausb_event *)__get_free_pages(GFP_KERNEL, page_order);
-	if (!ring->to_user_buffer)
-		return -ENOMEM;
-	ring->from_user_buffer = ring->to_user_buffer + MAUSB_RING_BUFFER_SIZE;
-	ring->head = 0;
-	ring->tail = 0;
-	ring->current_from_user = 0;
-	spin_lock_init(&ring->lock);
-
-	return 0;
-}
-
-int mausb_ring_buffer_put(struct mausb_ring_buffer *ring,
-			  struct mausb_event *event)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&ring->lock, flags);
-	if (CIRC_SPACE(ring->head, ring->tail, MAUSB_RING_BUFFER_SIZE) < 1) {
-		spin_unlock_irqrestore(&ring->lock, flags);
-		return -ENOSPC;
+	if (!dev) {
+		mausb_pr_err("Device not found, madev_addr=%#x", madev_addr);
+		return;
 	}
-	memcpy(ring->to_user_buffer + ring->head, event, sizeof(*event));
-	mausb_pr_debug("HEAD=%d, TAIL=%d", ring->head, ring->tail);
-	ring->head = (ring->head + 1) & (MAUSB_RING_BUFFER_SIZE - 1);
-	mausb_pr_debug("HEAD=%d, TAIL=%d", ring->head, ring->tail);
-	spin_unlock_irqrestore(&ring->lock, flags);
-	return 0;
-}
 
-static int mausb_ring_buffer_get(struct mausb_ring_buffer *ring,
-				struct mausb_event *event)
-{
-	unsigned long flags;
+	disconnect_event.type = MAUSB_EVENT_TYPE_DEV_DISCONNECT;
+	disconnect_event.status = -EINVAL;
+	disconnect_event.madev_addr = madev_addr;
 
-	spin_lock_irqsave(&ring->lock, flags);
-	if (CIRC_CNT(ring->head, ring->tail, MAUSB_RING_BUFFER_SIZE) < 1) {
-		spin_unlock_irqrestore(&ring->lock, flags);
-		return -ENOSPC;
-	}
-	memcpy(event, ring->to_user_buffer + ring->tail, sizeof(*event));
-	mausb_pr_debug("HEAD=%d, TAIL=%d", ring->head, ring->tail);
-	ring->tail = (ring->tail + 1) & (MAUSB_RING_BUFFER_SIZE - 1);
-	mausb_pr_debug("HEAD=%d, TAIL=%d", ring->head, ring->tail);
-	spin_unlock_irqrestore(&ring->lock, flags);
-	return 0;
-}
+	memcpy(ring->to_user_buffer + ring->head, &disconnect_event,
+	       sizeof(disconnect_event));
 
-void mausb_ring_buffer_cleanup(struct mausb_ring_buffer *ring)
-{
-	struct mausb_event event;
-
-	mausb_pr_info("");
-	while (mausb_ring_buffer_get(ring, &event) == 0)
-		mausb_cleanup_ring_buffer_event(&event);
-}
-
-void mausb_ring_buffer_destroy(struct mausb_ring_buffer *ring)
-{
-	int page_order = mausb_get_page_order(2 * MAUSB_RING_BUFFER_SIZE,
-					      sizeof(struct mausb_event));
-	if (ring && ring->to_user_buffer)
-		free_pages((unsigned long)ring->to_user_buffer, page_order);
-}
-
-int mausb_ring_buffer_move_tail(struct mausb_ring_buffer *ring, uint32_t count)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&ring->lock, flags);
-	if (CIRC_CNT(ring->head, ring->tail, MAUSB_RING_BUFFER_SIZE) < count) {
-		spin_unlock_irqrestore(&ring->lock, flags);
-		return -ENOSPC;
-	}
-	mausb_pr_debug("old HEAD=%d, TAIL=%d", ring->head, ring->tail);
-	ring->tail = (ring->tail + count) & (MAUSB_RING_BUFFER_SIZE - 1);
-	mausb_pr_debug("new HEAD=%d, TAIL=%d", ring->head, ring->tail);
-	spin_unlock_irqrestore(&ring->lock, flags);
-	return 0;
+	mausb_pr_info("Disconnect event added to ring buffer for madev_addr=%#x",
+		      madev_addr);
+	mausb_pr_info("Adding hcd_disconnect_work to dev workq, madev_addr=%#x",
+		      madev_addr);
+	queue_work(dev->workq, &dev->hcd_disconnect_work);
 }

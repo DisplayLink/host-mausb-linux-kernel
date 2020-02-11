@@ -15,13 +15,11 @@
 #include <types.h>
 #endif /* __KERNEL__ */
 
-#define _MA_USB_SET_FIELD(_m, _v) (((~((_m) - 1) & (_m)) * (_v)) & (_m))
-#define _MA_USB_GET_FIELD(_m, _v) (((_v) & (_m)) / (~((_m) - 1) & (_m)))
-#define MA_USB_SET_FIELD_(_m_, _v) _MA_USB_SET_FIELD(MA_USB_##_m_##_MASK, _v)
-#define MA_USB_GET_FIELD_(_m_, _v) _MA_USB_GET_FIELD(MA_USB_##_m_##_MASK, _v)
-#define MA_USB_SET_FIELD(_m_, _v) _MA_USB_SET_FIELD(MA_USB_##_m_##_MASK, \
+#define MA_USB_SET_FIELD_(_m_, _v) __mausb_set_field(MA_USB_##_m_##_MASK, _v)
+#define MA_USB_GET_FIELD_(_m_, _v) __mausb_get_field(MA_USB_##_m_##_MASK, _v)
+#define MA_USB_SET_FIELD(_m_, _v) __mausb_set_field(MA_USB_##_m_##_MASK, \
 						    MA_USB_##_v)
-#define MA_USB_GET_FIELD(_m_, _v) _MA_USB_GET_FIELD(MA_USB_##_m_##_MASK, \
+#define MA_USB_GET_FIELD(_m_, _v) __mausb_get_field(MA_USB_##_m_##_MASK, \
 						    MA_USB_##_v)
 
 #define MA_USB_MGMT_TOKEN_RESERVED  0
@@ -85,14 +83,6 @@
 	_MA_USB_HDR_TYPE_MANAGEMENT_REQ(MA_USB_HDR_TYPE_SUBTYPE_##_s)
 #define MA_USB_HDR_TYPE_MANAGEMENT_RESP(_s) \
 	_MA_USB_HDR_TYPE_MANAGEMENT_RESP(MA_USB_HDR_TYPE_SUBTYPE_##_s)
-#define MA_USB_HDR_TYPE_IS_MANAGEMENT(_v) ( \
-	MA_USB_GET_FIELD_(HDR_TYPE_TYPE, _v) \
-	== MA_USB_HDR_TYPE_TYPE_MANAGEMENT)
-#define MA_USB_HDR_TYPE_IS_MANAGEMENT_RESP(_v) ( \
-	MA_USB_HDR_TYPE_IS_MANAGEMENT(_v) && \
-	(MA_USB_GET_FIELD_(HDR_TYPE_SUBTYPE, _v) & 1) != 0)
-#define MA_USB_HDR_TYPE_MANAGEMENT_GET_SUBTYPE(_v) ( \
-	MA_USB_HDR_TYPE_IS_MANAGEMENT(_v) ? ((_v) >> 1) : -1)
 
 #define MA_USB_HDR_TYPE_SUBTYPE_CAP               0
 #define MA_USB_HDR_TYPE_SUBTYPE_USBDEVHANDLE      1
@@ -127,14 +117,16 @@
 
 /* Data subtypes */
 
-#define _MA_USB_HDR_TYPE_DATA_REQ(_s) ( \
+#define _MA_USB_HDR_TYPE_DATA_REQ(_s) ({ \
+	typeof(_s) (s) = (_s); \
 	MA_USB_SET_FIELD(HDR_TYPE_TYPE, HDR_TYPE_TYPE_DATA) | \
-	MA_USB_SET_FIELD_(HDR_TYPE_SUBTYPE, (_s) * 2 \
-	+ ((_s) > 0 ? 1 : 0)))
-#define _MA_USB_HDR_TYPE_DATA_RESP(_s) ( \
+	MA_USB_SET_FIELD_(HDR_TYPE_SUBTYPE, (s) * 2 \
+	+ ((s) > 0 ? 1 : 0)); })
+#define _MA_USB_HDR_TYPE_DATA_RESP(_s) ({ \
+	typeof(_s) (s) = (_s); \
 	MA_USB_SET_FIELD(HDR_TYPE_TYPE, HDR_TYPE_TYPE_DATA) | \
-	MA_USB_SET_FIELD_(HDR_TYPE_SUBTYPE, (_s) * 2 + 1 \
-	+ ((_s) > 0 ? 1 : 0)))
+	MA_USB_SET_FIELD_(HDR_TYPE_SUBTYPE, (s) * 2 + 1 \
+	+ ((s) > 0 ? 1 : 0)); })
 #define _MA_USB_HDR_TYPE_DATA_ACK(_s) ( \
 	MA_USB_SET_FIELD(HDR_TYPE_TYPE, HDR_TYPE_TYPE_DATA) | \
 	MA_USB_SET_FIELD_(HDR_TYPE_SUBTYPE, (_s) * 2 + 2))
@@ -145,9 +137,6 @@
 	_MA_USB_HDR_TYPE_DATA_RESP(MA_USB_HDR_TYPE_SUBTYPE_##_s)
 #define MA_USB_HDR_TYPE_DATA_ACK(_s) \
 	_MA_USB_HDR_TYPE_DATA_ACK(MA_USB_HDR_TYPE_SUBTYPE_##_s)
-#define MA_USB_HDR_TYPE_IS_DATA(_v) ( \
-	MA_USB_GET_FIELD_(HDR_TYPE_TYPE, _v) \
-	== MA_USB_HDR_TYPE_TYPE_DATA)
 
 #define MA_USB_HDR_TYPE_SUBTYPE_TRANSFER          0
 #define MA_USB_HDR_TYPE_SUBTYPE_ISOCHTRANSFER     1
@@ -259,10 +248,10 @@
 
 #define MAUSB_MAX_MGMT_SIZE 50
 
-#define MAUSB_TRANSFER_HDR_SIZE (sizeof(struct ma_usb_hdr_common) +\
-				 sizeof(struct ma_usb_hdr_transfer))
+#define MAUSB_TRANSFER_HDR_SIZE (u32)(sizeof(struct ma_usb_hdr_common) +\
+				      sizeof(struct ma_usb_hdr_transfer))
 
-#define MAUSB_ISOCH_TRANSFER_HDR_SIZE (sizeof(struct ma_usb_hdr_common) +\
+#define MAUSB_ISOCH_TRANSFER_HDR_SIZE (u16)(sizeof(struct ma_usb_hdr_common) +\
 			sizeof(struct ma_usb_hdr_isochtransfer) +\
 			sizeof(struct ma_usb_hdr_isochtransfer_optional))
 
@@ -270,63 +259,63 @@
 	MAUSB_ISOCH_TRANSFER_HDR_SIZE - 20 /* IP header size */ -\
 	8 /* UDP header size*/)
 
-#define shift_ptr(ptr, offset) ((uint8_t *)(ptr) + (offset))
+#define shift_ptr(ptr, offset) ((u8 *)(ptr) + (offset))
 
 /* USB descriptor */
 struct ma_usb_desc {
-	uint8_t length;
-	uint8_t type;
-	uint8_t value[0];
+	u8 length;
+	u8 type;
+	u8 value[0];
 } __packed;
 
 struct ma_usb_ep_handle {
-	uint16_t d         :1,
-		 ep_n      :4,
-		 addr      :7,
-		 bus_n     :4;
+	u16 d		:1,
+	    ep_n	:4,
+	    addr	:7,
+	    bus_n	:4;
 };
 
 struct ma_usb_hdr_mgmt {
-	uint32_t status    :8,
-		 token     :10,  /* requestor originator allocated */
-		 reserved  :14;
+	u32 status	:8,
+	    token	:10,  /* requestor originator allocated */
+	    reserved	:14;
 } __aligned(4);
 
 struct ma_usb_hdr_ctrl {	/* used in all req/resp/conf operations */
-	int8_t status;
-	uint8_t link_type;
+	s8 status;
+	u8 link_type;
 	union {
-		uint8_t tid;	/* ieee 802.11 */
+		u8 tid;	/* ieee 802.11 */
 	} connection_id;
 } __aligned(4);
 
 struct ma_usb_hdr_data {
-	int8_t status;
-	uint8_t eps	:2,
-		t_flags	:6;
+	s8 status;
+	u8 eps		:2,
+	   t_flags	:6;
 	union {
-		uint16_t stream_id;
+		u16 stream_id;
 		struct {
-			uint16_t headers  :12,
-				 i_flags  :4;
+			u16 headers	:12,
+			    i_flags	:4;
 		};
 	};
 } __aligned(4);
 
 struct ma_usb_hdr_common {
-	uint8_t version	:4,
-		flags	:4;
-	uint8_t  type;
-	uint16_t length;
+	u8 version	:4,
+	   flags	:4;
+	u8  type;
+	u16 length;
 	union {
-		uint16_t dev;
-		uint16_t epv;
+		u16 dev;
+		u16 epv;
 		struct ma_usb_ep_handle eph;
 	} handle;
-	uint8_t dev_addr;
-	uint8_t ssid;
+	u8 dev_addr;
+	u8 ssid;
 	union {
-		int8_t status;
+		s8 status;
 		struct ma_usb_hdr_mgmt mgmt;
 		struct ma_usb_hdr_ctrl ctrl;
 		struct ma_usb_hdr_data data;
@@ -336,97 +325,97 @@ struct ma_usb_hdr_common {
 /* capreq extra hdr */
 
 struct ma_usb_hdr_capreq {
-	uint32_t out_mgmt_reqs	:12,
-		 reserved	:20;
+	u32 out_mgmt_reqs	:12,
+	    reserved		:20;
 } __aligned(4);
 
 struct ma_usb_capreq_desc_synchronization {
-	uint8_t media_time_available  :1,
-		reserved              :7;
+	u8 media_time_available	:1,
+	   reserved		:7;
 } __packed;
 
 struct ma_usb_capreq_desc_link_sleep {
-	uint8_t link_sleep_capable    :1,
-		reserved              :7;
+	u8 link_sleep_capable	:1,
+	   reserved		:7;
 } __packed;
 
 /* capresp extra hdr */
 
 struct ma_usb_hdr_capresp {
-	uint16_t endpoints;
-	uint8_t devices;
-	uint8_t streams		:5,
-		dev_type	:3;
-	uint32_t descs		:8,
-		 descs_length	:24;
-	uint16_t out_transfer_reqs;
-	uint16_t out_mgmt_reqs	:12,
-		 reserved	:4;
+	u16 endpoints;
+	u8 devices;
+	u8 streams		:5,
+	   dev_type		:3;
+	u32 descs		:8,
+	    descs_length	:24;
+	u16 out_transfer_reqs;
+	u16 out_mgmt_reqs	:12,
+	    reserved		:4;
 } __aligned(4);
 
 struct ma_usb_capresp_desc_speed {
-	uint8_t reserved1	:4,
+	u8 reserved1		:4,
 		speed		:4;
-	uint8_t reserved2	:4,
-		lse		:2,	/* USB3.1 8.5.6.7, Table 8-22 */
-		reserved3	:2;
+	u8 reserved2		:4,
+	   lse			:2,	/* USB3.1 8.5.6.7, Table 8-22 */
+	   reserved3		:2;
 } __packed;
 
 struct ma_usb_capresp_desc_p_managed_out {
-	uint8_t elastic_buffer		:1,
-		drop_notification	:1,
-		reserved		:6;
+	u8 elastic_buffer		:1,
+	   drop_notification		:1,
+	   reserved			:6;
 } __packed;
 
 struct ma_usb_capresp_desc_isochronous {
-	uint8_t payload_dword_aligned	:1,
-		reserved		:7;
+	u8 payload_dword_aligned	:1,
+	   reserved			:7;
 } __packed;
 
 struct ma_usb_capresp_desc_synchronization {
-	uint8_t media_time_available	:1,
-		time_stamp_required	:1,/* hubs need this set */
-		reserved		:6;
+	u8 media_time_available	:1,
+	   time_stamp_required	:1,/* hubs need this set */
+	   reserved		:6;
 } __packed;
 
 struct ma_usb_capresp_desc_container_id {
-	uint8_t container_id[16];	/* UUID IETF RFC 4122 */
+	u8 container_id[16];	/* UUID IETF RFC 4122 */
 } __packed;
 
 struct ma_usb_capresp_desc_link_sleep {
-	uint8_t link_sleep_capable	:1,
-		reserved		:7;
+	u8 link_sleep_capable	:1,
+	   reserved		:7;
 } __packed;
 
 struct ma_usb_capresp_desc_hub_latency {
-	uint16_t latency;		/* USB3.1 */
+	u16 latency;		/* USB3.1 */
 } __packed;
 
 /* usbdevhandlereq extra hdr */
 struct ma_usb_hdr_usbdevhandlereq {
-	uint32_t route_string	:20,
-		 speed		:4,
-		 reserved1	:8;
-	uint16_t hub_dev_handle;
-	uint16_t reserved2;
-	uint16_t parent_hs_hub_dev_handle;
-	uint16_t parent_hs_hub_port	:4,
-		 mtt			:1,	/* USB2.0 11.14, 11.14.1.3 */
-		 lse			:2,	/* USB3.1 8.5.6.7, Table 8-22 */
-		 reserved3		:9;
+	u32 route_string	:20,
+	    speed		:4,
+	    reserved1		:8;
+	u16 hub_dev_handle;
+	u16 reserved2;
+	u16 parent_hs_hub_dev_handle;
+	u16 parent_hs_hub_port		:4,
+	    mtt				:1,	/* USB2.0 11.14, 11.14.1.3 */
+	    lse				:2,	/* USB3.1 8.5.6.7, Table 8-22 */
+	    reserved3			:9;
 } __aligned(4);
 
 /* usbdevhandleresp extra hdr */
 struct ma_usb_hdr_usbdevhandleresp {
-	uint16_t dev_handle;
-	uint16_t reserved;
+	u16 dev_handle;
+	u16 reserved;
 } __aligned(4);
 
 /* ephandlereq extra hdr */
 struct ma_usb_hdr_ephandlereq {
-	uint32_t ep_descs	:5,
-		 ep_desc_size	:6,
-		 reserved	:21;
+	u32 ep_descs		:5,
+	    ep_desc_size	:6,
+	    reserved		:21;
 } __aligned(4);
 
 /*
@@ -434,13 +423,13 @@ struct ma_usb_hdr_ephandlereq {
  * See USB2.0 9.6.6, Table 9-13
  */
 struct usb_ep_desc {
-	uint8_t bLength;
+	u8 bLength;
 	/* USB2.0 9.4, Table 9-5 (5) usb/ch9.h: USB_DT_ENDPOINT */
-	uint8_t bDescriptorType;
-	uint8_t  bEndpointAddress;
-	uint8_t  bmAttributes;
-	uint16_t wMaxPacketSize;
-	uint8_t  bInterval;
+	u8 bDescriptorType;
+	u8  bEndpointAddress;
+	u8  bmAttributes;
+	__le16 wMaxPacketSize;
+	u8  bInterval;
 } __packed;
 
 /*
@@ -448,12 +437,12 @@ struct usb_ep_desc {
  * See USB3.1 9.6.7, Table 9-26
  */
 struct usb_ss_ep_comp_desc {
-	uint8_t bLength;
+	u8 bLength;
 	/* USB3.1 9.4, Table 9-6 (48) usb/ch9.h: USB_DT_SS_ENDPOINT_COMP */
-	uint8_t  bDescriptorType;
-	uint8_t  bMaxBurst;
-	uint8_t  bmAttributes;
-	uint16_t wBytesPerInterval;
+	u8  bDescriptorType;
+	u8  bMaxBurst;
+	u8  bmAttributes;
+	__le16 wBytesPerInterval;
 } __packed;
 
 /*
@@ -461,11 +450,11 @@ struct usb_ss_ep_comp_desc {
  * See USB3.1 9.6.8, Table 9-27
  */
 struct usb_ss_plus_isoch_ep_comp_desc {
-	uint8_t bLength;
+	u8 bLength;
 	/* USB3.1 9.4, Table 9-6 (49) usb/ch9.h: not yet defined! */
-	uint8_t bDescriptorType;
-	uint16_t wReserved;
-	uint32_t dwBytesPerInterval;
+	u8 bDescriptorType;
+	u16 wReserved;
+	u32 dwBytesPerInterval;
 } __packed;
 
 struct ma_usb_ephandlereq_desc_std {
@@ -489,149 +478,149 @@ struct ma_usb_dev_context {
 
 /* ephandleresp extra hdr */
 struct ma_usb_hdr_ephandleresp {
-	uint32_t ep_descs :5,
-		 reserved :27;
+	u32 ep_descs :5,
+	    reserved :27;
 } __aligned(4);
 
 /* ephandleresp descriptor */
 struct ma_usb_ephandleresp_desc {
 	union {
 		struct ma_usb_ep_handle eph;
-		uint16_t		epv;
+		u16		epv;
 	} ep_handle;
-	uint16_t d	   :1,		/* non-control or non-OUT */
-		 isoch	   :1,
-		 l_managed :1,		/* control or non-isoch OUT */
-		 invalid   :1,
-		 reserved1 :12;
-	uint16_t ccu;			/* control or non-isoch OUT */
-	uint16_t reserved2;
-	uint32_t buffer_size;		/* control or OUT */
-	uint16_t isoch_prog_delay;	/* in us. */
-	uint16_t isoch_resp_delay;	/* in us. */
+	u16 d		:1,	/* non-control or non-OUT */
+	    isoch	:1,
+	    l_managed	:1,	/* control or non-isoch OUT */
+	    invalid	:1,
+	    reserved1	:12;
+	u16 ccu;		/* control or non-isoch OUT */
+	u16 reserved2;
+	u32 buffer_size;	/* control or OUT */
+	u16 isoch_prog_delay;	/* in us. */
+	u16 isoch_resp_delay;	/* in us. */
 } __aligned(4);
 
 /* epactivatereq extra hdr */
 struct ma_usb_hdr_epactivatereq {
-	uint32_t ep_handles :5,
-		 reserved   :27;
+	u32 ep_handles	:5,
+	    reserved	:27;
 	union {
-		uint16_t		epv;
+		u16		epv;
 		struct ma_usb_ep_handle eph;
 	} handle[0];
 } __aligned(4);
 
 /* epactivateresp extra hdr */
 struct ma_usb_hdr_epactivateresp {
-	uint32_t ep_errors :5,
-		 reserved  :27;
+	u32 ep_errors	:5,
+	    reserved	:27;
 	union {
-		uint16_t		epv;
+		u16			epv;
 		struct ma_usb_ep_handle eph;
 	} handle[0];
 } __aligned(4);
 
 /* epinactivatereq extra hdr */
 struct ma_usb_hdr_epinactivatereq {
-	uint32_t ep_handles	:5,
-		 suspend	:1,
-		 reserved	:26;
+	u32 ep_handles	:5,
+	    suspend	:1,
+	    reserved	:26;
 	union {
-		uint16_t		epv;
+		u16		epv;
 		struct ma_usb_ep_handle eph;
 	} handle[0];
 } __aligned(4);
 
 /* epinactivateresp extra hdr */
 struct ma_usb_hdr_epinactivateresp {
-	uint32_t ep_errors	:5,
-		 reserved	:27;
+	u32 ep_errors	:5,
+	    reserved	:27;
 	union {
-		uint16_t		epv;
+		u16		epv;
 		struct ma_usb_ep_handle eph;
 	} handle[0];
 } __aligned(4);
 
 /* epresetreq extra hdr */
 struct ma_usb_hdr_epresetreq {
-	uint32_t ep_reset_blocks :5,
-		 reserved	 :27;
+	u32 ep_reset_blocks	:5,
+	    reserved		:27;
 } __aligned(4);
 
 /* epresetreq reset block */
 struct ma_usb_epresetreq_block {
 	union {
-		uint16_t		epv;
+		u16			epv;
 		struct ma_usb_ep_handle eph;
 	} handle;
-	uint16_t tsp	  :1,
-		 reserved :15;
+	u16 tsp		:1,
+	    reserved	:15;
 } __aligned(4);
 
 /* epresetresp extra hdr */
 struct ma_usb_hdr_epresetresp {
-	uint32_t ep_errors :5,
-		 reserved  :27;
+	u32 ep_errors	:5,
+	    reserved	:27;
 	union {
-		uint16_t		epv;
+		u16			epv;
 		struct ma_usb_ep_handle eph;
 	} handle[0];
 } __aligned(4);
 
 /* cleartransfersreq extra hdr */
 struct ma_usb_hdr_cleartransfersreq {
-	uint32_t info_blocks	:8,
-		 reserved	:24;
+	u32 info_blocks	:8,
+	    reserved	:24;
 } __aligned(4);
 
 /* cleartransfersreq info block */
 struct ma_usb_cleartransfersreq_block {
 	union {
-		uint16_t		epv;
+		u16			epv;
 		struct ma_usb_ep_handle eph;
 	} handle;
-	uint16_t stream_id;	/* ss stream eps only */
-	uint32_t start_req_id	:8,
-		 reserved	:24;
+	u16 stream_id; /* ss stream eps only */
+	u32 start_req_id	:8,
+	    reserved		:24;
 } __aligned(4);
 
 /* cleartransfersresp extra hdr */
 struct ma_usb_hdr_cleartransfersresp {
-	uint32_t status_blocks	:8,
-		 reserved	:24;
+	u32 status_blocks	:8,
+	    reserved		:24;
 } __aligned(4);
 
 /* cleartransfersresp status block */
 struct ma_usb_cleartransfersresp_block {
 	union {
-		uint16_t		epv;
+		u16			epv;
 		struct ma_usb_ep_handle eph;
 	} handle;
-	uint16_t stream_id;	/* ss stream eps only */
-	uint32_t cancel_success	  :1,
-		 partial_delivery :1,
-		 reserved	  :30;
-	uint32_t last_req_id	 :8,
-		 delivered_seq_n :24;	/* OUT w/partial_delivery only */
-	uint32_t delivered_byte_offset;	/* OUT w/partial_delivery only */
+	u16 stream_id;	/* ss stream eps only */
+	u32 cancel_success	:1,
+	    partial_delivery	:1,
+	    reserved		:30;
+	u32 last_req_id		:8,
+	    delivered_seq_n	:24;	/* OUT w/partial_delivery only */
+	u32 delivered_byte_offset;	/* OUT w/partial_delivery only */
 } __aligned(4);
 
 /* ephandledeletereq extra hdr */
 struct ma_usb_hdr_ephandledeletereq {
-	uint32_t ep_handles :5,
-		 reserved   :27;
+	u32 ep_handles	:5,
+	    reserved	:27;
 	union {
-		uint16_t		epv;
+		u16			epv;
 		struct ma_usb_ep_handle eph;
 	} handle[0];
 } __aligned(4);
 
 /* ephandledeleteresp extra hdr */
 struct ma_usb_hdr_ephandledeleteresp {
-	uint32_t ep_errors :5,
-		 reserved  :27;
+	u32 ep_errors	:5,
+	    reserved	:27;
 	union {
-		uint16_t		epv;
+		u16			epv;
 		struct ma_usb_ep_handle eph;
 	} handle[0];
 } __aligned(4);
@@ -639,10 +628,10 @@ struct ma_usb_hdr_ephandledeleteresp {
 /* modifyep0req extra hdr */
 struct ma_usb_hdr_modifyep0req {
 	union {
-		uint16_t		epv;
+		u16			epv;
 		struct ma_usb_ep_handle eph;
 	} handle;
-	uint16_t max_packet_size;
+	u16 max_packet_size;
 } __aligned(4);
 
 /*
@@ -652,34 +641,34 @@ struct ma_usb_hdr_modifyep0req {
  */
 struct ma_usb_hdr_modifyep0resp {
 	union {
-		uint16_t		epv;
+		u16			epv;
 		struct ma_usb_ep_handle eph;
 	} handle;
 
-	uint16_t reserved;
+	u16 reserved;
 } __aligned(4);
 
 /* setusbdevaddrreq extra hdr */
 struct ma_usb_hdr_setusbdevaddrreq {
-	uint16_t response_timeout;	/* in ms. */
-	uint16_t reserved;
+	u16 response_timeout;	/* in ms. */
+	u16 reserved;
 } __aligned(4);
 
 /* setusbdevaddrresp extra hdr */
 struct ma_usb_hdr_setusbdevaddrresp {
-	uint32_t addr	  :7,
-		 reserved :25;
+	u32 addr	:7,
+	    reserved	:25;
 } __aligned(4);
 
 /* updatedevreq extra hdr */
 struct ma_usb_hdr_updatedevreq {
-	uint16_t max_exit_latency;	/* hubs only */
-	uint8_t hub	:1,
-		ports	:4,
-		mtt	:1,
-		ttt	:2;
-	uint8_t integrated_hub_latency	:1,
-		reserved		:7;
+	u16 max_exit_latency;	/* hubs only */
+	u8 hub		:1,
+	   ports	:4,
+	   mtt		:1,
+	   ttt		:2;
+	u8 integrated_hub_latency	:1,
+	   reserved			:7;
 } __aligned(4);
 
 /*
@@ -687,22 +676,24 @@ struct ma_usb_hdr_updatedevreq {
  * See USB2.0 9.6.6, Table 9-13
  */
 struct usb_dev_desc {
-	uint8_t bLength;
-	uint8_t bDescriptorType;/* USB2.0 9.4, Table 9-5 (1)
-				 * usb/ch9.h: USB_DT_DEVICE
-				 */
-	uint16_t bcdUSB;
-	uint8_t  bDeviceClass;
-	uint8_t  bDeviceSubClass;
-	uint8_t  bDeviceProtocol;
-	uint8_t  bMaxPacketSize0;
-	uint16_t idVendor;
-	uint16_t idProduct;
-	uint16_t bcdDevice;
-	uint8_t  iManufacturer;
-	uint8_t  iProduct;
-	uint8_t  iSerialNumber;
-	uint8_t  bNumConfigurations;
+	u8 bLength;
+	/*
+	 * USB2.0 9.4, Table 9-5 (1)
+	 * usb/ch9.h: USB_DT_DEVICE
+	 */
+	u8 bDescriptorType;
+	__le16 bcdUSB;
+	u8  bDeviceClass;
+	u8  bDeviceSubClass;
+	u8  bDeviceProtocol;
+	u8  bMaxPacketSize0;
+	__le16 idVendor;
+	__le16 idProduct;
+	__le16 bcdDevice;
+	u8  iManufacturer;
+	u8  iProduct;
+	u8  iSerialNumber;
+	u8  bNumConfigurations;
 } __packed;
 
 struct ma_usb_updatedevreq_desc {
@@ -711,137 +702,168 @@ struct ma_usb_updatedevreq_desc {
 
 /* remotewakereq extra hdr */
 struct ma_usb_hdr_remotewakereq {
-	uint32_t resumed  :1,
+	u32 resumed  :1,
 		 reserved :31;
 } __aligned(4);
 
 /* synchreq/resp extra hdr */
 struct ma_usb_hdr_synch {
-	uint32_t mtd_valid	:1,	/* MA-USB1.0b 6.5.1.8, Table 66 */
-		 resp_required	:1,
-		 reserved	:30;
+	u32 mtd_valid		:1,	/* MA-USB1.0b 6.5.1.8, Table 66 */
+	    resp_required	:1,
+	    reserved		:30;
 	union {
-		uint32_t timestamp;	/* MA-USB1.0b 6.5.1.11 */
+		u32 timestamp;		/* MA-USB1.0b 6.5.1.11 */
 		struct {
-			uint32_t delta		:13,
-				 bus_interval	:19;
-		};		/* MA-USB1.0b 6.6.1, Table 69 */
+			u32 delta		:13,
+			    bus_interval	:19;
+		};			/* MA-USB1.0b 6.6.1, Table 69 */
 	};
-	uint32_t mtd;		/* MA-USB1.0b 6.5.1.12 */
+	u32 mtd;			/* MA-USB1.0b 6.5.1.12 */
 } __aligned(4);
 
 /* canceltransferreq extra hdr */
 struct ma_usb_hdr_canceltransferreq {
 	union {
-		uint16_t		epv;
+		u16			epv;
 		struct ma_usb_ep_handle eph;
 	} handle;
-	uint16_t stream_id;
-	uint32_t req_id	  :8,
+	u16 stream_id;
+	u32 req_id	  :8,
 		 reserved :24;
 } __aligned(4);
 
 /* canceltransferresp extra hdr */
 struct ma_usb_hdr_canceltransferresp {
 	union {
-		uint16_t		epv;
+		u16			epv;
 		struct ma_usb_ep_handle eph;
 	} handle;
-	uint16_t stream_id;
-	uint32_t req_id		:8,
-		 cancel_status	:3,
-		 reserved1	:21;
-	uint32_t delivered_seq_n :24,
-		 reserved2	 :8;
-	uint32_t delivered_byte_offset;
+	u16 stream_id;
+	u32 req_id		:8,
+	    cancel_status	:3,
+	    reserved1		:21;
+	u32 delivered_seq_n	:24,
+	    reserved2		:8;
+	u32 delivered_byte_offset;
 } __aligned(4);
 
 /* transferreq/resp/ack extra hdr */
 struct ma_usb_hdr_transfer {
-	uint32_t seq_n	:24,
-		 req_id	:8;
+	u32 seq_n	:24,
+	    req_id	:8;
 	union {
-		uint32_t rem_size_credit;
+		u32 rem_size_credit;
 		/* ISOCH aliased fields added for convenience. */
 		struct {
-			uint32_t presentation_time :20,
-				 segments	   :12;
+			u32 presentation_time	:20,
+			    segments		:12;
 		};
 	};
 } __aligned(4);
 
 /* isochtransferreq/resp extra hdr */
 struct ma_usb_hdr_isochtransfer {
-	uint32_t seq_n	:24,
-		 req_id	:8;
-	uint32_t presentation_time :20,
-		 segments	   :12;
+	u32 seq_n		:24,
+	    req_id		:8;
+	u32 presentation_time	:20,
+	    segments		:12;
 } __aligned(4);
 
 /* isochtransferreq/resp optional hdr */
 struct ma_usb_hdr_isochtransfer_optional {
 	union {
-		uint32_t timestamp;	/* MA-USB1.0b 6.5.1.11 */
+		u32 timestamp;	/* MA-USB1.0b 6.5.1.11 */
 		struct {
-			uint32_t delta		:13,
-				 bus_interval	:19;
+			u32 delta		:13,
+			    bus_interval	:19;
 		};		/* MA-USB1.0b 6.6.1, Table 69 */
 	};
-	uint32_t mtd;		/* MA-USB1.0b 6.5.1.12 */
+	u32 mtd;		/* MA-USB1.0b 6.5.1.12 */
 } __aligned(4);
 
 /* isochdatablock hdrs */
 
 struct ma_usb_hdr_isochdatablock_short {
-	uint16_t block_length;
-	uint16_t segment_number	:12,
-		 s_flags	:4;
+	u16 block_length;
+	u16 segment_number	:12,
+	    s_flags		:4;
 } __aligned(4);
 
 struct ma_usb_hdr_isochdatablock_std {
-	uint16_t block_length;
-	uint16_t segment_number	:12,
-		 s_flags	:4;
-	uint16_t segment_length;
-	uint16_t fragment_offset;
+	u16 block_length;
+	u16 segment_number	:12,
+	    s_flags		:4;
+	u16 segment_length;
+	u16 fragment_offset;
 } __aligned(4);
 
 struct ma_usb_hdr_isochdatablock_long {
-	uint16_t block_length;
-	uint16_t segment_number	:12,
-		 s_flags	:4;
-	uint32_t segment_length;
-	uint32_t fragment_offset;
+	u16 block_length;
+	u16 segment_number	:12,
+	    s_flags		:4;
+	u32 segment_length;
+	u32 fragment_offset;
 } __aligned(4);
 
 /* isochreadsizeblock hdrs */
 
 struct ma_usb_hdr_isochreadsizeblock_std {
-	uint32_t service_intervals	:12,
-		 max_segment_length	:20;
+	u32 service_intervals		:12,
+	    max_segment_length		:20;
 } __aligned(4);
 
 struct ma_usb_hdr_isochreadsizeblock_long {
-	uint32_t service_intervals	:12,
-		 reserved		:20;
-	uint32_t max_segment_length;
+	u32 service_intervals		:12,
+	    reserved			:20;
+	u32 max_segment_length;
 } __aligned(4);
 
-static inline struct ma_usb_hdr_transfer *mausb_get_data_transfer_hdr(
-	struct ma_usb_hdr_common *hdr)
+static inline int __mausb_set_field(int m, int v)
+{
+	return ((~((m) - 1) & (m)) * (v)) & (m);
+}
+
+static inline int __mausb_get_field(int m, int v)
+{
+	return ((v) & (m)) / (~((m) - 1) & (m));
+}
+
+static inline bool mausb_is_management_hdr_type(int hdr_type)
+{
+	return MA_USB_GET_FIELD_(HDR_TYPE_TYPE, hdr_type)
+			== MA_USB_HDR_TYPE_TYPE_MANAGEMENT;
+}
+
+static inline bool mausb_is_data_hdr_type(int hdr_type)
+{
+	return MA_USB_GET_FIELD_(HDR_TYPE_TYPE, hdr_type)
+			== MA_USB_HDR_TYPE_TYPE_DATA;
+}
+
+static inline bool mausb_is_management_resp_hdr_type(int hdr_resp_type)
+{
+	return mausb_is_management_hdr_type(hdr_resp_type) &&
+			(MA_USB_GET_FIELD_(HDR_TYPE_SUBTYPE, hdr_resp_type) & 1)
+			!= 0;
+}
+
+static inline
+struct ma_usb_hdr_transfer *
+mausb_get_data_transfer_hdr(struct ma_usb_hdr_common *hdr)
 {
 	return (struct ma_usb_hdr_transfer *)shift_ptr(hdr, sizeof(*hdr));
 }
 
-static inline struct ma_usb_hdr_isochtransfer *mausb_get_isochtransfer_hdr(
-	struct ma_usb_hdr_common *hdr)
+static inline
+struct ma_usb_hdr_isochtransfer *
+mausb_get_isochtransfer_hdr(struct ma_usb_hdr_common *hdr)
 {
 	return (struct ma_usb_hdr_isochtransfer *)shift_ptr(hdr, sizeof(*hdr));
 }
 
 static inline
-struct ma_usb_hdr_isochtransfer_optional *mausb_hdr_isochtransfer_optional_hdr(
-						struct ma_usb_hdr_common *hdr)
+struct ma_usb_hdr_isochtransfer_optional *
+mausb_hdr_isochtransfer_optional_hdr(struct ma_usb_hdr_common *hdr)
 {
 	return (struct ma_usb_hdr_isochtransfer_optional *)
 			shift_ptr(hdr, sizeof(struct ma_usb_hdr_common) +

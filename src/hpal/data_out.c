@@ -16,7 +16,7 @@
 #include "utils/mausb_logs.h"
 
 static int mausb_add_data_chunk(void *buffer, u32 buffer_size,
-			 struct list_head *chunks_list)
+				struct list_head *chunks_list)
 {
 	struct mausb_payload_chunk *data_chunk;
 
@@ -35,11 +35,11 @@ static int mausb_add_data_chunk(void *buffer, u32 buffer_size,
 
 static int mausb_init_data_wrapper(struct mausb_kvec_data_wrapper *data,
 				   struct list_head *chunks_list,
-				   uint32_t num_of_data_chunks)
+				   u32 num_of_data_chunks)
 {
 	struct mausb_payload_chunk *data_chunk = NULL,
 				   *tmp = NULL;
-	uint32_t current_kvec = 0;
+	u32 current_kvec = 0;
 
 	data->length = 0;
 	data->kvec =
@@ -61,12 +61,10 @@ static int mausb_init_data_wrapper(struct mausb_kvec_data_wrapper *data,
 
 static int mausb_init_header_data_chunk(struct ma_usb_hdr_common *common_hdr,
 					struct list_head *chunks_list,
-					uint32_t *num_of_data_chunks)
+					u32 *num_of_data_chunks)
 {
-	int status = mausb_add_data_chunk(common_hdr,
-					  MAUSB_TRANSFER_HDR_SIZE,
+	int status = mausb_add_data_chunk(common_hdr, MAUSB_TRANSFER_HDR_SIZE,
 					  chunks_list);
-	/* Success */
 	if (!status)
 		++(*num_of_data_chunks);
 
@@ -74,22 +72,20 @@ static int mausb_init_header_data_chunk(struct ma_usb_hdr_common *common_hdr,
 }
 
 static int mausb_init_control_data_chunk(struct mausb_event *event,
-				  struct list_head *chunks_list,
-				  uint32_t *num_of_data_chunks)
+					 struct list_head *chunks_list,
+					 u32 *num_of_data_chunks)
 {
-	int status = 0;
+	int status;
+	void *buffer = ((struct urb *)event->data.urb)->setup_packet;
 
 	if (!event->data.first_control_packet)
-		goto l_return;
+		return 0;
 
-	status = mausb_add_data_chunk(
-				((struct urb *)event->data.urb)->setup_packet,
-				MAUSB_CONTROL_SETUP_SIZE, chunks_list);
-	/* Success */
+	status = mausb_add_data_chunk(buffer, MAUSB_CONTROL_SETUP_SIZE,
+				      chunks_list);
 	if (!status)
 		++(*num_of_data_chunks);
 
-l_return:
 	return status;
 }
 
@@ -103,26 +99,27 @@ static void mausb_cleanup_chunks_list(struct list_head *chunks_list)
 	}
 }
 
-static int mausb_prepare_transfer_packet(
-		struct mausb_kvec_data_wrapper *wrapper,
-				  struct mausb_event *event,
-				  struct mausb_data_iter *iterator)
+static int
+mausb_prepare_transfer_packet(struct mausb_kvec_data_wrapper *wrapper,
+			      struct mausb_event *event,
+			      struct mausb_data_iter *iterator)
 {
-	uint32_t num_of_data_chunks	    = 0;
-	uint32_t num_of_payload_data_chunks = 0;
-	uint32_t payload_data_size	    = 0;
+	u32 num_of_data_chunks		= 0;
+	u32 num_of_payload_data_chunks	= 0;
+	u32 payload_data_size		= 0;
+	int status = 0;
 	struct list_head chunks_list;
 	struct list_head payload_data_chunks;
-	int status = 0;
+	struct ma_usb_hdr_common *data_hdr = (struct ma_usb_hdr_common *)
+			event->data.hdr;
 
 	INIT_LIST_HEAD(&chunks_list);
 
 	/* Initialize data chunk for MAUSB header and add it to chunks list */
-	if (mausb_init_header_data_chunk(
-				(struct ma_usb_hdr_common *)event->data.hdr,
-				&chunks_list, &num_of_data_chunks) < 0) {
+	if (mausb_init_header_data_chunk(data_hdr, &chunks_list,
+					 &num_of_data_chunks) < 0) {
 		status = -ENOMEM;
-		goto l_cleanup_data_chunks;
+		goto cleanup_data_chunks;
 	}
 
 	/*
@@ -132,22 +129,22 @@ static int mausb_prepare_transfer_packet(
 	if (mausb_init_control_data_chunk(event, &chunks_list,
 					  &num_of_data_chunks) < 0) {
 		status = -ENOMEM;
-		goto l_cleanup_data_chunks;
+		goto cleanup_data_chunks;
 	}
 
 	/* Get data chunks for data payload to send */
 	INIT_LIST_HEAD(&payload_data_chunks);
 	payload_data_size =
 			((struct ma_usb_hdr_common *)event->data.hdr)->length -
-			MAUSB_TRANSFER_HDR_SIZE -
-			(event->data.first_control_packet ?
-				MAUSB_CONTROL_SETUP_SIZE : 0);
+			 MAUSB_TRANSFER_HDR_SIZE -
+			 (event->data.first_control_packet ?
+			  MAUSB_CONTROL_SETUP_SIZE : 0);
 
 	if (mausb_data_iterator_read(iterator, payload_data_size,
 				     &payload_data_chunks,
 				     &num_of_payload_data_chunks) < 0) {
 		status = -ENOMEM;
-		goto l_cleanup_data_chunks;
+		goto cleanup_data_chunks;
 	}
 
 	list_splice_tail(&payload_data_chunks, &chunks_list);
@@ -157,10 +154,10 @@ static int mausb_prepare_transfer_packet(
 	if (mausb_init_data_wrapper(wrapper, &chunks_list,
 				    num_of_data_chunks) < 0) {
 		status = -ENOMEM;
-		goto l_cleanup_data_chunks;
+		goto cleanup_data_chunks;
 	}
 
-l_cleanup_data_chunks: /* Cleanup all allocated data chunk in case of error */
+cleanup_data_chunks: /* Cleanup all allocated data chunks */
 	mausb_cleanup_chunks_list(&chunks_list);
 	return status;
 }
@@ -168,8 +165,9 @@ l_cleanup_data_chunks: /* Cleanup all allocated data chunk in case of error */
 int mausb_send_out_data_msg(struct mausb_device *dev, struct mausb_event *event,
 			    struct mausb_urb_ctx *urb_ctx)
 {
-	int status = 0;
+	int status;
 	struct mausb_kvec_data_wrapper data;
+	enum mausb_channel channel;
 
 	status = mausb_prepare_transfer_packet(&data, event,
 					       &urb_ctx->iterator);
@@ -179,19 +177,18 @@ int mausb_send_out_data_msg(struct mausb_device *dev, struct mausb_event *event,
 		return status;
 	}
 
-	status = mausb_send_data(dev, mausb_transfer_type_to_channel(
-				 event->data.transfer_type), &data);
+	channel = mausb_transfer_type_to_channel(event->data.transfer_type);
+	status = mausb_send_data(dev, channel, &data);
 
 	kfree(data.kvec);
 
 	return status;
 }
 
-int mausb_receive_out_data(struct mausb_device *dev, struct mausb_event *event,
-			   struct mausb_urb_ctx *urb_ctx)
+void mausb_receive_out_data(struct mausb_event *event,
+			    struct mausb_urb_ctx *urb_ctx)
 {
 	struct urb *urb = urb_ctx->urb;
-	int status = 0;
 
 	mausb_pr_debug("transfer_size=%d, rem_transfer_size=%d, status=%d",
 		       event->data.transfer_size, event->data.rem_transfer_size,
@@ -202,6 +199,4 @@ int mausb_receive_out_data(struct mausb_device *dev, struct mausb_event *event,
 				       event->data.rem_transfer_size,
 				       event->status);
 	}
-
-	return status;
 }

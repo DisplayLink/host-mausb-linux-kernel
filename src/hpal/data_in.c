@@ -16,19 +16,17 @@
 
 int mausb_send_in_data_msg(struct mausb_device *dev, struct mausb_event *event)
 {
-	int status = 0;
 	struct mausb_kvec_data_wrapper data_to_send;
 	struct kvec kvec[2];
 	struct urb *urb   = (struct urb *)(event->data.urb);
 	bool setup_packet = (usb_endpoint_xfer_control(&urb->ep->desc) &&
 			     urb->setup_packet);
-	uint32_t kvec_num = setup_packet ? 2 : 1;
+	u32 kvec_num = setup_packet ? 2 : 1;
+	enum mausb_channel channel;
 
 	data_to_send.kvec_num	= kvec_num;
 	data_to_send.length	= MAUSB_TRANSFER_HDR_SIZE +
-					(setup_packet ?
-						MAUSB_CONTROL_SETUP_SIZE :
-						0);
+			(setup_packet ? MAUSB_CONTROL_SETUP_SIZE : 0);
 
 	/* Prepare transfer header kvec */
 	kvec[0].iov_base = event->data.hdr;
@@ -41,28 +39,23 @@ int mausb_send_in_data_msg(struct mausb_device *dev, struct mausb_event *event)
 	}
 	data_to_send.kvec = kvec;
 
-	status = mausb_send_data(dev, mausb_transfer_type_to_channel(
-						event->data.transfer_type),
-				&data_to_send);
-
-	return status;
+	channel = mausb_transfer_type_to_channel(event->data.transfer_type);
+	return mausb_send_data(dev, channel, &data_to_send);
 }
 
-int mausb_receive_in_data(struct mausb_device *dev, struct mausb_event *event,
-			  struct mausb_urb_ctx *urb_ctx)
+void mausb_receive_in_data(struct mausb_event *event,
+			   struct mausb_urb_ctx *urb_ctx)
 {
 	struct urb *urb = urb_ctx->urb;
 	struct mausb_data_iter *iterator     = &urb_ctx->iterator;
 	struct ma_usb_hdr_common *common_hdr =
 			(struct ma_usb_hdr_common *)event->data.recv_buf;
-	uint16_t payload_size = common_hdr->length - MAUSB_TRANSFER_HDR_SIZE;
-	uint32_t data_written = 0;
-	int status = 0;
+	void *buffer;
+	u32 payload_size = common_hdr->length - MAUSB_TRANSFER_HDR_SIZE;
+	u32 data_written = 0;
 
-	mausb_pr_debug("");
-
-	data_written = mausb_data_iterator_write(iterator, shift_ptr(common_hdr,
-						 MAUSB_TRANSFER_HDR_SIZE),
+	buffer = shift_ptr(common_hdr, MAUSB_TRANSFER_HDR_SIZE);
+	data_written = mausb_data_iterator_write(iterator, buffer,
 						 payload_size);
 
 	mausb_pr_debug("data_written=%d, payload_size=%d", data_written,
@@ -77,6 +70,4 @@ int mausb_receive_in_data(struct mausb_device *dev, struct mausb_event *event,
 				       event->data.rem_transfer_size,
 				       event->status);
 	}
-
-	return status;
 }

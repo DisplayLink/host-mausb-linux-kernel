@@ -46,20 +46,19 @@ static inline bool mausb_isoch_data_event(struct mausb_event *event)
 }
 
 /* usb to mausb transfer type */
-static inline uint8_t mausb_transfer_type_from_usb(
-					struct usb_endpoint_descriptor *epd)
+static inline
+u8 mausb_transfer_type_from_usb(struct usb_endpoint_descriptor *epd)
 {
-	return (uint8_t)usb_endpoint_type(epd) << 3;
+	return (u8)usb_endpoint_type(epd) << 3;
 }
 
-static inline uint8_t mausb_transfer_type_from_hdr(
-						struct ma_usb_hdr_common *hdr)
+static inline u8 mausb_transfer_type_from_hdr(struct ma_usb_hdr_common *hdr)
 {
 	return hdr->data.t_flags & MA_USB_DATA_TFLAGS_TRANSFER_TYPE_MASK;
 }
 
-static inline enum mausb_channel mausb_transfer_type_to_channel(
-						uint8_t transfer_type)
+static inline
+enum mausb_channel mausb_transfer_type_to_channel(u8 transfer_type)
 {
 	return transfer_type >> 3;
 }

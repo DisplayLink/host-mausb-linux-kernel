@@ -18,21 +18,21 @@
 #define ADDR_LEN 16
 
 struct mausb_device_address {
-	uint8_t linkType;
+	u8 link_type;
 	struct {
 		union {
 			char	ip4[ADDR_LEN];
-			uint8_t	ip6[ADDR_LEN];
-		} Address;
-		uint8_t numberOfPorts;
+			u8	ip6[ADDR_LEN];
+		} address;
+		u8 number_of_ports;
 		struct {
-			uint16_t management;
-			uint16_t control;
-			uint16_t bulk;
-			uint16_t interrupt;
-			uint16_t isochronous;
-		} Port;
-	} Ip;
+			u16 management;
+			u16 control;
+			u16 bulk;
+			u16 interrupt;
+			u16 isochronous;
+		} port;
+	} ip;
 };
 
 #endif /* __MAUSB_COMMON_MAUSB_ADDRESS_H__ */
