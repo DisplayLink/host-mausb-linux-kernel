@@ -1,26 +1,22 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2019 - 2020 DisplayLink (UK) Ltd.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
-#include "link/mausb_ip_link.h"
+#include "ip_link.h"
 
 #include <linux/in.h>
 #include <linux/inet.h>
 #include <linux/jiffies.h>
-#include <linux/net.h>
 #include <linux/kernel.h>
+#include <linux/net.h>
 #include <linux/skbuff.h>
 #include <linux/socket.h>
 #include <linux/version.h>
 #include <linux/workqueue.h>
-#include <net/tcp.h>
 #include <net/sock.h>
+#include <net/tcp.h>
 
-#include "utils/mausb_logs.h"
+#include "utils.h"
 
 static void __mausb_ip_connect(struct work_struct *work);
 static int __mausb_ip_recv(struct mausb_ip_ctx *ip_ctx);
@@ -40,11 +36,11 @@ int mausb_init_ip_ctx(struct mausb_ip_ctx **ip_ctx,
 		      enum mausb_channel channel)
 {
 	struct mausb_ip_ctx *ctx;
+
 	*ip_ctx = kzalloc(sizeof(**ip_ctx), GFP_ATOMIC);
-	if (!*ip_ctx) {
-		mausb_pr_alert("ip context allocation failed");
+	if (!*ip_ctx)
 		return -ENOMEM;
-	}
+
 	ctx = *ip_ctx;
 	ctx->client_socket = NULL;
 	__mausb_ip_recv_ctx_clear(&ctx->recv_ctx);
@@ -59,15 +55,12 @@ int mausb_init_ip_ctx(struct mausb_ip_ctx **ip_ctx,
 	ctx->connect_workq = alloc_ordered_workqueue("connect_workq",
 						     WQ_MEM_RECLAIM);
 	if (!ctx->connect_workq) {
-		mausb_pr_alert("connect_workq alloc failed");
 		kfree(ctx);
 		return -ENOMEM;
 	}
 
-	ctx->recv_workq =
-	    alloc_ordered_workqueue("recv_workq", WQ_MEM_RECLAIM);
+	ctx->recv_workq = alloc_ordered_workqueue("recv_workq", WQ_MEM_RECLAIM);
 	if (!ctx->recv_workq) {
-		mausb_pr_alert("send_recv_workq alloc failed");
 		destroy_workqueue(ctx->connect_workq);
 		kfree(ctx);
 		return -ENOMEM;
@@ -109,8 +102,13 @@ static void __mausb_ip_set_options(struct socket *sock, bool udp)
 	u32 optval = 0;
 	unsigned int optlen = sizeof(optval);
 	int status = 0;
+#if KERNEL_VERSION(5, 1, 0) <= LINUX_VERSION_CODE
+	struct __kernel_sock_timeval timeo = {.tv_sec = 0, .tv_usec = 500000U };
+	struct __kernel_sock_timeval send_timeo = {.tv_sec = 1, .tv_usec = 0 };
+#else
 	struct timeval timeo = {.tv_sec = 0, .tv_usec = 500000U };
 	struct timeval send_timeo = {.tv_sec = 1, .tv_usec = 0 };
+#endif
 
 	if (!udp) {
 		optval = 1;

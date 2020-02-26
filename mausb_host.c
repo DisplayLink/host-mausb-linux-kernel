@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2019 - 2020 DisplayLink (UK) Ltd.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
 #include <linux/in.h>
 #include <linux/inet.h>
@@ -15,12 +11,10 @@
 #include <linux/moduleparam.h>
 #include <linux/net.h>
 
-#include "common/mausb_address.h"
-#include "hcd/vhcd.h"
-#include "hpal/hpal.h"
-#include "utils/mausb_logs.h"
-#include "utils/mausb_mmap.h"
-#include "utils/mausb_version.h"
+#include "hcd.h"
+#include "hpal.h"
+#include "mausb_address.h"
+#include "utils.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("DisplayLink (UK) Ltd.");
@@ -175,7 +169,7 @@ module_param_cb(ip, &mausb_device_connect_ops,
 module_param_cb(disconnect, &mausb_device_disconnect_ops,
 		&mausb_device_disconnect_param, 0664);
 
-static int host_mausb_init(void)
+static int mausb_host_init(void)
 {
 	int status;
 
@@ -205,7 +199,7 @@ cleanup:
 	return status;
 }
 
-static void host_mausb_exit(void)
+static void mausb_host_exit(void)
 {
 	mausb_pr_info("Module unloading started...");
 	mausb_unregister_power_state_listener();
@@ -215,5 +209,5 @@ static void host_mausb_exit(void)
 	mausb_pr_info("Module unloaded. Version=%s", MAUSB_DRIVER_VERSION);
 }
 
-module_init(host_mausb_init);
-module_exit(host_mausb_exit);
+module_init(mausb_host_init);
+module_exit(mausb_host_exit);

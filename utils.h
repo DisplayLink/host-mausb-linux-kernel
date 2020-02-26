@@ -1,22 +1,21 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 - 2020 DisplayLink (UK) Ltd.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
-#ifndef __MAUSB_UTILS_MAUSB_LOGS_H__
-#define __MAUSB_UTILS_MAUSB_LOGS_H__
+#ifndef __MAUSB_UTILS_H__
+#define __MAUSB_UTILS_H__
 
-#ifdef MAUSB_WITH_LOGS
+#include "hpal.h"
+
+#if defined(MAUSB_NO_LOGS)
+#define mausb_pr_logs(...)
+#else
+#include <linux/printk.h>
 #include <linux/sched.h>
 #define mausb_pr_logs(level_str, level, log, ...)\
 	pr_##level_str("MAUSB " #level " [%x:%x] [%s] " log "\n",\
 	current->pid, current->tgid, __func__, ##__VA_ARGS__)
-#else
-#define mausb_pr_logs(...)
-#endif /* MAUSB_WITH_LOGS */
+#endif /* MAUSB_NO_LOGS */
 
 #define mausb_pr_alert(...) mausb_pr_logs(alert, 1, ##__VA_ARGS__)
 
@@ -32,4 +31,15 @@
 	#define mausb_pr_debug(...)
 #endif /* defined(MAUSB_LOG_VERBOSE) */
 
-#endif /* __MAUSB_UTILS_MAUSB_LOGS_H__ */
+#define MAUSB_STRINGIFY2(x) #x
+#define MAUSB_STRINGIFY(x) MAUSB_STRINGIFY2(x)
+
+#define MAUSB_DRIVER_VERSION MAUSB_STRINGIFY(1.2.0.0.3d0edd13)
+
+int mausb_create_dev(void);
+void mausb_cleanup_dev(int device_created);
+void mausb_notify_completed_user_events(struct mausb_ring_buffer *ring_buffer);
+void mausb_notify_ring_events(struct mausb_ring_buffer *ring_buffer);
+void mausb_stop_ring_events(void);
+
+#endif /* __MAUSB_UTILS_H__ */

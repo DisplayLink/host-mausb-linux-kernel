@@ -1,22 +1,17 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 - 2020 DisplayLink (UK) Ltd.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
-#ifndef __MAUSB_HPAL_HPAL_H__
-#define __MAUSB_HPAL_HPAL_H__
+#ifndef __MAUSB_HPAL_H__
+#define __MAUSB_HPAL_H__
 
 #include <linux/kref.h>
 #include <linux/suspend.h>
 #include <linux/usb.h>
 
-#include "common/mausb_address.h"
-#include "common/mausb_event.h"
-#include "hcd/hub.h"
-#include "link/mausb_ip_link.h"
+#include "ip_link.h"
+#include "mausb_address.h"
+#include "mausb_event.h"
 
 #define MAUSB_CONTROL_SETUP_SIZE	8
 #define MAUSB_BUSY_RETRIES_COUNT	3
@@ -181,4 +176,164 @@ void mausb_deinitialize_mss(void);
 int mausb_register_power_state_listener(void);
 void mausb_unregister_power_state_listener(void);
 
-#endif /* __MAUSB_HPAL_HPAL_H__ */
+void mausb_init_standard_ep_descriptor(struct ma_usb_ephandlereq_desc_std *
+				       std_desc,
+				       struct usb_endpoint_descriptor *
+				       usb_std_desc);
+void mausb_init_superspeed_ep_descriptor(struct ma_usb_ephandlereq_desc_ss *
+					 ss_desc,
+					 struct usb_endpoint_descriptor *
+					 usb_std_desc,
+					 struct usb_ss_ep_comp_descriptor *
+					 usb_ss_desc);
+
+int mausb_send_data(struct mausb_device *dev, enum mausb_channel channel_num,
+		    struct mausb_kvec_data_wrapper *data);
+
+int mausb_send_transfer_ack(struct mausb_device *dev,
+			    struct mausb_event *event);
+
+int mausb_send_data_msg(struct mausb_device *dev, struct mausb_event *event);
+
+int mausb_receive_data_msg(struct mausb_device *dev, struct mausb_event *event);
+
+int mausb_add_data_chunk(void *buffer, u32 buffer_size,
+			 struct list_head *chunks_list);
+
+int mausb_init_data_wrapper(struct mausb_kvec_data_wrapper *data,
+			    struct list_head *chunks_list,
+			    u32 num_of_data_chunks);
+
+void mausb_cleanup_chunks_list(struct list_head *chunks_list);
+
+static inline bool mausb_ctrl_transfer(struct ma_usb_hdr_common *hdr)
+{
+	return (hdr->data.t_flags & MA_USB_DATA_TFLAGS_TRANSFER_TYPE_MASK) ==
+		MA_USB_DATA_TFLAGS_TRANSFER_TYPE_CTRL;
+}
+
+static inline bool mausb_isoch_transfer(struct ma_usb_hdr_common *hdr)
+{
+	return (hdr->data.t_flags & MA_USB_DATA_TFLAGS_TRANSFER_TYPE_MASK) ==
+		MA_USB_DATA_TFLAGS_TRANSFER_TYPE_ISOCH;
+}
+
+static inline bool mausb_ctrl_data_event(struct mausb_event *event)
+{
+	return event->data.transfer_type ==
+		MA_USB_DATA_TFLAGS_TRANSFER_TYPE_CTRL;
+}
+
+static inline bool mausb_isoch_data_event(struct mausb_event *event)
+{
+	return event->data.transfer_type ==
+		MA_USB_DATA_TFLAGS_TRANSFER_TYPE_ISOCH;
+}
+
+/* usb to mausb transfer type */
+static inline
+u8 mausb_transfer_type_from_usb(struct usb_endpoint_descriptor *epd)
+{
+	return (u8)usb_endpoint_type(epd) << 3;
+}
+
+static inline u8 mausb_transfer_type_from_hdr(struct ma_usb_hdr_common *hdr)
+{
+	return hdr->data.t_flags & MA_USB_DATA_TFLAGS_TRANSFER_TYPE_MASK;
+}
+
+static inline
+enum mausb_channel mausb_transfer_type_to_channel(u8 transfer_type)
+{
+	return transfer_type >> 3;
+}
+
+void mausb_ip_callback(void *ctx, enum mausb_channel channel,
+		       enum mausb_link_action action, int status, void *data);
+
+struct mausb_data_iter {
+	u32 length;
+
+	void *buffer;
+	u32  buffer_len;
+	u32  offset;
+
+	struct scatterlist	*sg;
+	struct sg_mapping_iter	sg_iter;
+	bool		sg_started;
+	unsigned int	num_sgs;
+	unsigned int	flags;
+};
+
+struct mausb_payload_chunk {
+	struct list_head list_entry;
+	struct kvec	 kvec;
+};
+
+int mausb_data_iterator_read(struct mausb_data_iter *iterator,
+			     u32 byte_num,
+			     struct list_head *data_chunks_list,
+			     u32 *data_chunks_num);
+
+u32 mausb_data_iterator_length(struct mausb_data_iter *iterator);
+u32 mausb_data_iterator_write(struct mausb_data_iter *iterator, void *buffer,
+			      u32 length);
+
+void mausb_init_data_iterator(struct mausb_data_iter *iterator,
+			      void *buffer, u32 buffer_len,
+			      struct scatterlist *sg, unsigned int num_sgs,
+			      bool direction);
+void mausb_reset_data_iterator(struct mausb_data_iter *iterator);
+void mausb_uninit_data_iterator(struct mausb_data_iter *iterator);
+void mausb_data_iterator_seek(struct mausb_data_iter *iterator, u32 seek_delta);
+
+struct mausb_ring_buffer {
+	atomic_t mausb_ring_events;
+	atomic_t mausb_completed_user_events;
+
+	struct mausb_event *to_user_buffer;
+	int		head;
+	int		tail;
+	spinlock_t	lock; /* Protect ring buffer */
+	u64		id;
+
+	struct mausb_event *from_user_buffer;
+	int current_from_user;
+
+	struct list_head list_entry;
+	bool buffer_full;
+};
+
+int mausb_ring_buffer_init(struct mausb_ring_buffer *ring);
+int mausb_ring_buffer_put(struct mausb_ring_buffer *ring,
+			  struct mausb_event *event);
+int mausb_ring_buffer_move_tail(struct mausb_ring_buffer *ring, u32 count);
+void mausb_ring_buffer_cleanup(struct mausb_ring_buffer *ring);
+void mausb_ring_buffer_destroy(struct mausb_ring_buffer *ring);
+void mausb_cleanup_ring_buffer_event(struct mausb_event *event);
+void mausb_disconect_event_unsafe(struct mausb_ring_buffer *ring,
+				  uint8_t madev_addr);
+
+static inline unsigned int mausb_get_page_order(unsigned int num_of_elems,
+						unsigned int elem_size)
+{
+	unsigned int num_of_pages = DIV_ROUND_UP(num_of_elems * elem_size,
+						 PAGE_SIZE);
+	unsigned int order = (unsigned int)ilog2(num_of_pages) +
+					(is_power_of_2(num_of_pages) ? 0 : 1);
+	return order;
+}
+
+static inline
+struct mausb_event *mausb_ring_current_from_user(struct mausb_ring_buffer *ring)
+{
+	return ring->from_user_buffer + ring->current_from_user;
+}
+
+static inline void mausb_ring_next_from_user(struct mausb_ring_buffer *ring)
+{
+	ring->current_from_user = (ring->current_from_user + 1) &
+				  (MAUSB_RING_BUFFER_SIZE - 1);
+}
+
+#endif /* __MAUSB_HPAL_H__ */

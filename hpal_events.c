@@ -1,19 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2019 - 2020 DisplayLink (UK) Ltd.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
-#include <hpal/mausb_events.h>
+#include "hpal_events.h"
 
 #include <linux/slab.h>
 
-#include "hcd/hub.h"
-#include "hpal/data_common.h"
-#include "utils/mausb_logs.h"
-#include "utils/mausb_data_iterator.h"
+#include "hcd.h"
+#include "utils.h"
 
 void mausb_dev_reset_req_event(struct mausb_event *event)
 {
@@ -181,48 +175,6 @@ int mausb_usbdevhandle_event_from_user(struct mausb_device *dev,
 				       struct mausb_event *event)
 {
 	return mausb_signal_event(dev, event, event->mgmt.dev_handle.event_id);
-}
-
-static void mausb_populate_standard_ep_descriptor(struct usb_ep_desc *std_desc,
-						  struct usb_endpoint_descriptor
-						  *usb_std_desc)
-{
-	std_desc->bLength	   = usb_std_desc->bLength;
-	std_desc->bDescriptorType  = usb_std_desc->bDescriptorType;
-	std_desc->bEndpointAddress = usb_std_desc->bEndpointAddress;
-	std_desc->bmAttributes	   = usb_std_desc->bmAttributes;
-	std_desc->wMaxPacketSize   = usb_std_desc->wMaxPacketSize;
-	std_desc->bInterval	   = usb_std_desc->bInterval;
-}
-
-static void
-mausb_populate_superspeed_ep_descriptor(struct usb_ss_ep_comp_desc *ss_desc,
-					struct usb_ss_ep_comp_descriptor*
-					usb_ss_desc)
-{
-	ss_desc->bLength	   = usb_ss_desc->bLength;
-	ss_desc->bDescriptorType   = usb_ss_desc->bDescriptorType;
-	ss_desc->bMaxBurst	   = usb_ss_desc->bMaxBurst;
-	ss_desc->bmAttributes	   = usb_ss_desc->bmAttributes;
-	ss_desc->wBytesPerInterval = usb_ss_desc->wBytesPerInterval;
-}
-
-void
-mausb_init_standard_ep_descriptor(struct ma_usb_ephandlereq_desc_std *std_desc,
-				  struct usb_endpoint_descriptor *usb_std_desc)
-{
-	mausb_populate_standard_ep_descriptor(&std_desc->usb20, usb_std_desc);
-}
-
-void
-mausb_init_superspeed_ep_descriptor(struct ma_usb_ephandlereq_desc_ss *ss_desc,
-				    struct usb_endpoint_descriptor *
-				    usb_std_desc,
-				    struct usb_ss_ep_comp_descriptor *
-				    usb_ss_desc)
-{
-	mausb_populate_standard_ep_descriptor(&ss_desc->usb20, usb_std_desc);
-	mausb_populate_superspeed_ep_descriptor(&ss_desc->usb31, usb_ss_desc);
 }
 
 int mausb_ephandle_event_to_user(struct mausb_device *dev,

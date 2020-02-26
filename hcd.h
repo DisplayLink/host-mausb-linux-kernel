@@ -1,18 +1,78 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 - 2020 DisplayLink (UK) Ltd.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
-#ifndef __MAUSB_HCD_HUB_H__
-#define __MAUSB_HCD_HUB_H__
+#ifndef __MAUSB_HCD_H__
+#define __MAUSB_HCD_H__
 
+#include <linux/device.h>
+#include <linux/fs.h>
+#include <linux/major.h>
+#include <linux/proc_fs.h>
+#include <linux/rbtree.h>
+#include <linux/slab.h>
+#include <linux/uaccess.h>
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
 
-#include "utils/mausb_data_iterator.h"
+#include "hpal.h"
+
+#define DEVICE_NAME "mausb_host_hcd_dev"
+#define CLASS_NAME "mausb"
+
+#define NUMBER_OF_PORTS		15
+
+#define MAX_USB_DEVICE_DEPTH	6
+
+#define RESPONSE_TIMEOUT	5000
+
+enum mausb_device_type {
+	USBDEVICE = 0,
+	USB20HUB  = 1,
+	USB30HUB  = 2
+};
+
+enum mausb_device_speed {
+	LOW_SPEED	 = 0,
+	FULL_SPEED	 = 1,
+	HIGH_SPEED	 = 2,
+	SUPER_SPEED	 = 3,
+	SUPER_SPEED_PLUS = 4
+};
+
+struct mausb_hcd {
+	spinlock_t	lock;	/* Protect HCD during URB processing */
+	struct device	*pdev;
+	u16		connected_ports;
+
+	struct rb_root	mausb_urbs;
+	struct hub_ctx	*hcd_ss_ctx;
+	struct hub_ctx	*hcd_hs_ctx;
+	struct notifier_block power_state_listener;
+};
+
+struct mausb_dev {
+	u32		port_status;
+	struct rb_root	usb_devices;
+	u8		dev_speed;
+	void		*ma_dev;
+};
+
+struct hub_ctx {
+	struct mausb_hcd *mhcd;
+	struct usb_hcd	 *hcd;
+	struct mausb_dev ma_devs[NUMBER_OF_PORTS];
+};
+
+int mausb_init_hcd(void);
+void mausb_deinit_hcd(void);
+
+void mausb_port_has_changed(const enum mausb_device_type device_type,
+			    const enum mausb_device_speed device_speed,
+			    void *ma_dev);
+void mausb_hcd_disconnect(const u16 port_number,
+			  const enum mausb_device_type device_type,
+			  const enum mausb_device_speed device_speed);
 
 #define PORT_C_MASK \
 		((USB_PORT_STAT_C_CONNECTION \
@@ -112,4 +172,4 @@ int mausb_get_core_id(struct usb_hcd *hcd);
 
 void mausb_clear_hcd_madev(u16 port_number);
 
-#endif /* __MAUSB_HCD_HUB_H__ */
+#endif /* __MAUSB_HCD_H__ */

@@ -1,13 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 - 2020 DisplayLink (UK) Ltd.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
-#ifndef __MAUSB_COMMON_MA_USB_H__
-#define __MAUSB_COMMON_MA_USB_H__
+#ifndef __MAUSB_MA_USB_H__
+#define __MAUSB_MA_USB_H__
 
 #ifdef __KERNEL__
 #include <linux/types.h>
@@ -870,4 +866,4 @@ mausb_hdr_isochtransfer_optional_hdr(struct ma_usb_hdr_common *hdr)
 				       sizeof(struct ma_usb_hdr_isochtransfer));
 }
 
-#endif	/* __MAUSB_COMMON_MA_USB_H__ */
+#endif	/* __MAUSB_MA_USB_H__ */

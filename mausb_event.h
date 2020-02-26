@@ -1,15 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 - 2020 DisplayLink (UK) Ltd.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
-#ifndef __MAUSB_COMMON_MAUSB_EVENT_H__
-#define __MAUSB_COMMON_MAUSB_EVENT_H__
+#ifndef __MAUSB_MAUSB_EVENT_H__
+#define __MAUSB_MAUSB_EVENT_H__
 
-#include <common/ma_usb.h>
+#include "ma_usb.h"
 
 #define MAUSB_MAX_NUM_OF_MA_DEVS			15
 #define MAUSB_RING_BUFFER_SIZE				1024
@@ -225,4 +221,4 @@ struct mausb_events_notification {
 	u8  madev_addr;
 };
 
-#endif /* __MAUSB_COMMON_MAUSB_EVENT_H__ */
+#endif /* __MAUSB_MAUSB_EVENT_H__ */

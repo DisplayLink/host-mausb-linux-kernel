@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2019 - 2020 DisplayLink (UK) Ltd.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
-#include "utils/mausb_mmap.h"
+#include "utils.h"
 
 #include <linux/atomic.h>
 #include <linux/cdev.h>
@@ -18,10 +14,7 @@
 #include <linux/uaccess.h>
 #include <linux/version.h>
 
-#include "common/mausb_driver_status.h"
-#include "hpal/hpal.h"
-#include "utils/mausb_logs.h"
-#include "utils/mausb_ring_buffer.h"
+#include "mausb_driver_status.h"
 
 #define MAUSB_KERNEL_DEV_NAME "mausb_host"
 #define MAUSB_READ_DEVICE_TIMEOUT_MS 500
@@ -209,7 +202,8 @@ static ssize_t mausb_file_write(struct file *filp, const char __user *buffer,
 		return MAUSB_DRIVER_WRITE_ERROR;
 	}
 
-	copy_from_user(&notification, buffer, size);
+	if (copy_from_user(&notification, buffer, size))
+		return MAUSB_DRIVER_WRITE_ERROR;
 
 	spin_lock_irqsave(&mss.lock, flags);
 	dev = mausb_get_dev_from_addr_unsafe(notification.madev_addr);
@@ -294,14 +288,6 @@ release_ring_buffer:
 	return ret;
 }
 
-static char *mausb_kernel_devnode(struct device *dev, umode_t *mode)
-{
-	if (!mode)
-		return NULL;
-	*mode = 0666;
-	return NULL;
-}
-
 static const struct file_operations mausb_file_ops = {
 	.open	 = mausb_file_open,
 	.release = mausb_file_close,
@@ -325,8 +311,6 @@ int mausb_create_dev(void)
 		goto cleanup;
 	}
 
-	mausb_kernel_class->devnode = mausb_kernel_devnode;
-
 	if (!device_create(mausb_kernel_class, NULL, mausb_major_kernel, NULL,
 			   MAUSB_KERNEL_DEV_NAME "_dev")) {
 		status = -ENOMEM;
@@ -347,17 +331,13 @@ void mausb_cleanup_dev(int device_created)
 {
 	if (device_created) {
 		device_destroy(mausb_kernel_class, mausb_major_kernel);
-		mausb_pr_info("device destroyed");
 		cdev_del(&mausb_kernel_dev);
-		mausb_pr_info("device deleted");
-	}
-	if (mausb_kernel_class) {
-		class_destroy(mausb_kernel_class);
-		mausb_pr_info("class destroyed");
 	}
 
+	if (mausb_kernel_class)
+		class_destroy(mausb_kernel_class);
+
 	unregister_chrdev_region(mausb_major_kernel, 1);
-	mausb_pr_info("unregistered");
 }
 
 void mausb_notify_completed_user_events(struct mausb_ring_buffer *ring_buffer)

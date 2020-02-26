@@ -1,31 +1,20 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2019 - 2020 DisplayLink (UK) Ltd.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
-#include "hpal/hpal.h"
+#include "hpal.h"
 
+#include <linux/circ_buf.h>
 #include <linux/kobject.h>
 #include <linux/slab.h>
 #include <linux/sysfs.h>
 #include <linux/uio.h>
 #include <linux/version.h>
 
-#include "common/mausb_event.h"
-#include "hcd/hub.h"
-#include "hcd/vhcd.h"
-#include "hpal/mausb_events.h"
-#include "hpal/data_common.h"
-#include "hpal/network_callbacks.h"
-#include "link/mausb_ip_link.h"
-#include "utils/mausb_logs.h"
-#include "utils/mausb_mmap.h"
-#include "utils/mausb_ring_buffer.h"
-#include "utils/mausb_data_iterator.h"
-#include "utils/mausb_version.h"
+#include "hcd.h"
+#include "hpal_data.h"
+#include "hpal_events.h"
+#include "utils.h"
 
 #define MAUSB_DELETE_MADEV_TIMEOUT_MS 3000
 
@@ -761,9 +750,9 @@ static void mausb_heartbeat_timer_func(unsigned long data)
 	}
 }
 
-static struct mausb_device *mausb_create_madev(struct mausb_device_address
-					dev_addr, u8 madev_address,
-					int *status)
+static struct mausb_device *
+mausb_create_madev(struct mausb_device_address dev_addr, u8 madev_address,
+		   int *status)
 {
 	struct mausb_device *dev;
 	unsigned long flags = 0;
@@ -1283,6 +1272,48 @@ static int mausb_power_state_cb(struct notifier_block *nb, unsigned long action,
 	return NOTIFY_OK;
 }
 
+static void mausb_populate_standard_ep_descriptor(struct usb_ep_desc *std_desc,
+						  struct usb_endpoint_descriptor
+						  *usb_std_desc)
+{
+	std_desc->bLength	   = usb_std_desc->bLength;
+	std_desc->bDescriptorType  = usb_std_desc->bDescriptorType;
+	std_desc->bEndpointAddress = usb_std_desc->bEndpointAddress;
+	std_desc->bmAttributes	   = usb_std_desc->bmAttributes;
+	std_desc->wMaxPacketSize   = usb_std_desc->wMaxPacketSize;
+	std_desc->bInterval	   = usb_std_desc->bInterval;
+}
+
+static void
+mausb_populate_superspeed_ep_descriptor(struct usb_ss_ep_comp_desc *ss_desc,
+					struct usb_ss_ep_comp_descriptor*
+					usb_ss_desc)
+{
+	ss_desc->bLength	   = usb_ss_desc->bLength;
+	ss_desc->bDescriptorType   = usb_ss_desc->bDescriptorType;
+	ss_desc->bMaxBurst	   = usb_ss_desc->bMaxBurst;
+	ss_desc->bmAttributes	   = usb_ss_desc->bmAttributes;
+	ss_desc->wBytesPerInterval = usb_ss_desc->wBytesPerInterval;
+}
+
+void
+mausb_init_standard_ep_descriptor(struct ma_usb_ephandlereq_desc_std *std_desc,
+				  struct usb_endpoint_descriptor *usb_std_desc)
+{
+	mausb_populate_standard_ep_descriptor(&std_desc->usb20, usb_std_desc);
+}
+
+void
+mausb_init_superspeed_ep_descriptor(struct ma_usb_ephandlereq_desc_ss *ss_desc,
+				    struct usb_endpoint_descriptor *
+				    usb_std_desc,
+				    struct usb_ss_ep_comp_descriptor *
+				    usb_ss_desc)
+{
+	mausb_populate_standard_ep_descriptor(&ss_desc->usb20, usb_std_desc);
+	mausb_populate_superspeed_ep_descriptor(&ss_desc->usb31, usb_ss_desc);
+}
+
 struct mausb_device *mausb_get_dev_from_addr_unsafe(u8 madev_addr)
 {
 	struct mausb_device *dev = NULL;
@@ -1323,4 +1354,750 @@ static void mausb_signal_empty_mss(void)
 	if (list_empty(&mss.madev_list))
 		complete(&mss.empty);
 	spin_unlock_irqrestore(&mss.lock, flags);
+}
+
+static inline
+struct mausb_ip_ctx *mausb_get_data_channel(struct mausb_device *ma_dev,
+					    enum mausb_channel channel)
+{
+	if (channel >= MAUSB_CHANNEL_MAP_LENGTH)
+		return NULL;
+
+	return ma_dev->channel_map[channel];
+}
+
+int mausb_send_data(struct mausb_device *dev, enum mausb_channel channel_num,
+		    struct mausb_kvec_data_wrapper *data)
+{
+	struct mausb_ip_ctx *channel = mausb_get_data_channel(dev, channel_num);
+	int status = 0;
+
+	if (!channel)
+		return -ECHRNG;
+
+	status = mausb_ip_send(channel, data);
+
+	if (status < 0) {
+		mausb_pr_err("Send failed. Disconnecting... status=%d", status);
+		queue_work(dev->workq, &dev->socket_disconnect_work);
+		queue_work(dev->workq, &dev->hcd_disconnect_work);
+	}
+
+	return status;
+}
+
+int mausb_send_transfer_ack(struct mausb_device *dev, struct mausb_event *event)
+{
+	struct ma_usb_hdr_common *ack_hdr;
+	struct kvec kvec;
+	struct mausb_kvec_data_wrapper data_to_send;
+	enum mausb_channel channel;
+
+	ack_hdr = (struct ma_usb_hdr_common *)(&event->data.hdr_ack);
+
+	data_to_send.kvec	    = &kvec;
+	data_to_send.kvec->iov_base = ack_hdr;
+	data_to_send.kvec->iov_len  = ack_hdr->length;
+	data_to_send.kvec_num	    = 1;
+	data_to_send.length	    = ack_hdr->length;
+
+	channel = mausb_transfer_type_to_channel(event->data.transfer_type);
+	return mausb_send_data(dev, channel, &data_to_send);
+}
+
+int mausb_send_data_msg(struct mausb_device *dev, struct mausb_event *event)
+{
+	struct mausb_urb_ctx *urb_ctx;
+	int status = 0;
+
+	if (event->status != 0) {
+		mausb_pr_err("Event %d failed with status %d",
+			     event->type, event->status);
+		mausb_complete_urb(event);
+		return event->status;
+	}
+
+	urb_ctx = mausb_find_urb_in_tree((struct urb *)event->data.urb);
+
+	if (!urb_ctx) {
+		/* Transfer will be deleted from dequeue task */
+		mausb_pr_warn("Urb is already cancelled for event=%d",
+			      event->type);
+		return status;
+	}
+
+	if (mausb_isoch_data_event(event)) {
+		if (event->data.direction == MAUSB_DATA_MSG_DIRECTION_IN)
+			status = mausb_send_isoch_in_msg(dev, event);
+		else
+			status = mausb_send_isoch_out_msg(dev, event, urb_ctx);
+	} else {
+		if (event->data.direction == MAUSB_DATA_MSG_DIRECTION_IN)
+			status = mausb_send_in_data_msg(dev, event);
+		else
+			status = mausb_send_out_data_msg(dev, event, urb_ctx);
+	}
+
+	return status;
+}
+
+int mausb_receive_data_msg(struct mausb_device *dev, struct mausb_event *event)
+{
+	int status = 0;
+	struct mausb_urb_ctx *urb_ctx;
+
+	mausb_pr_debug("Direction=%d", event->data.direction);
+
+	if (!mausb_isoch_data_event(event)) {
+		status = mausb_send_transfer_ack(dev, event);
+		if (status < 0) {
+			mausb_pr_warn("Sending acknowledgment failed");
+			goto cleanup;
+		}
+	}
+
+	urb_ctx = mausb_find_urb_in_tree((struct urb *)event->data.urb);
+
+	if (!urb_ctx) {
+		/* Transfer will be deleted from dequeue task */
+		mausb_pr_warn("Urb is already cancelled");
+		goto cleanup;
+	}
+
+	if (mausb_isoch_data_event(event)) {
+		if (event->data.direction == MAUSB_DATA_MSG_DIRECTION_IN)
+			status = mausb_receive_isoch_in_data(dev, event,
+							     urb_ctx);
+		else
+			status = mausb_receive_isoch_out(event);
+	} else {
+		if (event->data.direction == MAUSB_DATA_MSG_DIRECTION_IN)
+			mausb_receive_in_data(event, urb_ctx);
+		else
+			mausb_receive_out_data(event, urb_ctx);
+	}
+
+cleanup:
+	mausb_release_event_resources(event);
+	return status;
+}
+
+int mausb_add_data_chunk(void *buffer, u32 buffer_size,
+			 struct list_head *chunks_list)
+{
+	struct mausb_payload_chunk *data_chunk;
+
+	data_chunk = kzalloc(sizeof(*data_chunk), GFP_KERNEL);
+	if (!data_chunk)
+		return -ENOMEM;
+
+	/* Initialize data chunk for MAUSB header and add it to chunks list */
+	INIT_LIST_HEAD(&data_chunk->list_entry);
+
+	data_chunk->kvec.iov_base = buffer;
+	data_chunk->kvec.iov_len  = buffer_size;
+	list_add_tail(&data_chunk->list_entry, chunks_list);
+	return 0;
+}
+
+int mausb_init_data_wrapper(struct mausb_kvec_data_wrapper *data,
+			    struct list_head *chunks_list,
+			    u32 num_of_data_chunks)
+{
+	struct mausb_payload_chunk *data_chunk = NULL;
+	struct mausb_payload_chunk *tmp = NULL;
+	u32 current_kvec = 0;
+
+	data->length = 0;
+	data->kvec = kcalloc(num_of_data_chunks, sizeof(struct kvec),
+			     GFP_KERNEL);
+	if (!data->kvec)
+		return -ENOMEM;
+
+	list_for_each_entry_safe(data_chunk, tmp, chunks_list, list_entry) {
+		data->kvec[current_kvec].iov_base =
+			data_chunk->kvec.iov_base;
+		data->kvec[current_kvec].iov_len =
+		    data_chunk->kvec.iov_len;
+		++data->kvec_num;
+		data->length += data_chunk->kvec.iov_len;
+		++current_kvec;
+	}
+	return 0;
+}
+
+void mausb_cleanup_chunks_list(struct list_head *chunks_list)
+{
+	struct mausb_payload_chunk *data_chunk = NULL;
+	struct mausb_payload_chunk *tmp = NULL;
+
+	list_for_each_entry_safe(data_chunk, tmp, chunks_list, list_entry) {
+		list_del(&data_chunk->list_entry);
+		kfree(data_chunk);
+	}
+}
+
+static void mausb_init_ip_ctx_helper(struct mausb_device *dev,
+				     struct mausb_ip_ctx **ip_ctx,
+				     u16 port,
+				     enum mausb_channel channel)
+{
+	int status = mausb_init_ip_ctx(ip_ctx, dev->net_ns,
+				       dev->dev_addr.ip.address.ip4, port, dev,
+				       mausb_ip_callback, channel);
+	if (status < 0) {
+		mausb_pr_err("Init ip context failed with error=%d", status);
+		queue_work(dev->workq, &dev->socket_disconnect_work);
+		return;
+	}
+
+	dev->channel_map[channel] = *ip_ctx;
+	mausb_ip_connect_async(*ip_ctx);
+}
+
+static void mausb_connect_callback(struct mausb_device *dev,
+				   enum mausb_channel channel, int status)
+{
+	struct mausb_device_address *dev_addr = &dev->dev_addr;
+
+	mausb_pr_info("Connect callback for channel=%d with status=%d",
+		      channel, status);
+
+	if (status < 0) {
+		queue_work(dev->workq, &dev->socket_disconnect_work);
+		return;
+	}
+
+	if (channel == MAUSB_MGMT_CHANNEL) {
+		if (dev_addr->ip.port.control == 0) {
+			dev->channel_map[MAUSB_CTRL_CHANNEL] =
+				dev->mgmt_channel;
+			channel = MAUSB_CTRL_CHANNEL;
+		} else {
+			mausb_init_ip_ctx_helper(dev, &dev->ctrl_channel,
+						 dev_addr->ip.port.control,
+						 MAUSB_CTRL_CHANNEL);
+			return;
+		}
+	}
+
+	if (channel == MAUSB_CTRL_CHANNEL) {
+		if (dev_addr->ip.port.bulk == 0) {
+			dev->channel_map[MAUSB_BULK_CHANNEL] =
+				dev->channel_map[MAUSB_CTRL_CHANNEL];
+			channel = MAUSB_BULK_CHANNEL;
+		} else {
+			mausb_init_ip_ctx_helper(dev, &dev->bulk_channel,
+						 dev_addr->ip.port.bulk,
+						 MAUSB_BULK_CHANNEL);
+			return;
+		}
+	}
+
+	if (channel == MAUSB_BULK_CHANNEL) {
+		if (dev_addr->ip.port.isochronous == 0) {
+			/* if there is no isoch port use tcp for it */
+			dev->channel_map[MAUSB_ISOCH_CHANNEL] =
+				dev->channel_map[MAUSB_BULK_CHANNEL];
+			channel = MAUSB_ISOCH_CHANNEL;
+		} else {
+			mausb_init_ip_ctx_helper(dev, &dev->isoch_channel,
+						 dev_addr->ip.port.isochronous,
+						 MAUSB_ISOCH_CHANNEL);
+			return;
+		}
+	}
+
+	if (channel == MAUSB_ISOCH_CHANNEL) {
+		dev->channel_map[MAUSB_INTR_CHANNEL] =
+				dev->channel_map[MAUSB_CTRL_CHANNEL];
+		mausb_on_madev_connected(dev);
+	}
+}
+
+static void mausb_handle_connect_event(struct mausb_device *dev,
+				       enum mausb_channel channel, int status,
+				       void *data)
+{
+	mausb_connect_callback(dev, channel, status);
+}
+
+static void mausb_handle_receive_event(struct mausb_device *dev,
+				       enum mausb_channel channel, int status,
+				       void *data)
+{
+	struct mausb_event event;
+
+	event.madev_addr = dev->madev_addr;
+
+	if (status <= 0) {
+		mausb_pr_err("Receive event error status=%d", status);
+		queue_work(dev->workq, &dev->socket_disconnect_work);
+		queue_work(dev->workq, &dev->hcd_disconnect_work);
+		return;
+	}
+
+	mausb_reset_connection_timer(dev);
+
+	status = mausb_msg_received_event(&event,
+					  (struct ma_usb_hdr_common *)data,
+					  channel);
+	if (status == 0)
+		status = mausb_enqueue_event_to_user(dev, &event);
+
+	if (status < 0)
+		mausb_pr_err("Failed to enqueue, status=%d", status);
+}
+
+void mausb_ip_callback(void *ctx, enum mausb_channel channel,
+		       enum mausb_link_action action, int status, void *data)
+{
+	struct mausb_device *dev = (struct mausb_device *)ctx;
+
+	switch (action) {
+	case MAUSB_LINK_CONNECT:
+		mausb_handle_connect_event(dev, channel, status, data);
+		break;
+	case MAUSB_LINK_SEND:
+		/*
+		 * Currently there is nothing to do, as send operation is
+		 * synchronous
+		 */
+		break;
+	case MAUSB_LINK_RECV:
+		mausb_handle_receive_event(dev, channel, status, data);
+		break;
+	case MAUSB_LINK_DISCONNECT:
+		/*
+		 * Currently there is nothing to do, as disconnect operation is
+		 * synchronous
+		 */
+		break;
+	default:
+		mausb_pr_warn("Unknown network action");
+	}
+}
+
+static int mausb_read_virtual_buffer(struct mausb_data_iter *iterator,
+				     u32 byte_num,
+				     struct list_head *data_chunks_list,
+				     u32 *data_chunks_num)
+{
+	u32 rem_data		= 0;
+	u32 bytes_to_read	= 0;
+	struct mausb_payload_chunk *data_chunk = NULL;
+
+	(*data_chunks_num) = 0;
+
+	if (!data_chunks_list)
+		return -EINVAL;
+
+	INIT_LIST_HEAD(data_chunks_list);
+	rem_data      = iterator->length - iterator->offset;
+	bytes_to_read = min(byte_num, rem_data);
+
+	if (bytes_to_read == 0)
+		return 0;
+
+	data_chunk = kzalloc(sizeof(*data_chunk), GFP_KERNEL);
+
+	if (!data_chunk)
+		return -ENOMEM;
+
+	++(*data_chunks_num);
+
+	data_chunk->kvec.iov_base = (u8 *)(iterator->buffer) + iterator->offset;
+	data_chunk->kvec.iov_len = bytes_to_read;
+	iterator->offset += bytes_to_read;
+
+	list_add_tail(&data_chunk->list_entry, data_chunks_list);
+
+	return 0;
+}
+
+static int mausb_read_scatterlist_buffer(struct mausb_data_iter *iterator,
+					 u32 byte_num,
+					 struct list_head *data_chunks_list,
+					 u32 *data_chunks_num)
+{
+	u32 current_sg_read_num;
+	struct mausb_payload_chunk *data_chunk = NULL;
+
+	(*data_chunks_num) = 0;
+
+	if (!data_chunks_list)
+		return -EINVAL;
+
+	INIT_LIST_HEAD(data_chunks_list);
+
+	while (byte_num) {
+		if (iterator->sg_iter.consumed == iterator->sg_iter.length) {
+			if (!sg_miter_next(&iterator->sg_iter))
+				break;
+			iterator->sg_iter.consumed = 0;
+		}
+
+		data_chunk = kzalloc(sizeof(*data_chunk), GFP_KERNEL);
+		if (!data_chunk) {
+			sg_miter_stop(&iterator->sg_iter);
+			return -ENOMEM;
+		}
+
+		current_sg_read_num = min((size_t)byte_num,
+					  iterator->sg_iter.length -
+					  iterator->sg_iter.consumed);
+
+		data_chunk->kvec.iov_base = (u8 *)iterator->sg_iter.addr +
+				iterator->sg_iter.consumed;
+		data_chunk->kvec.iov_len  = current_sg_read_num;
+
+		++(*data_chunks_num);
+		list_add_tail(&data_chunk->list_entry, data_chunks_list);
+
+		byte_num -= current_sg_read_num;
+		iterator->sg_iter.consumed += current_sg_read_num;
+		data_chunk = NULL;
+	}
+
+	return 0;
+}
+
+static u32 mausb_write_virtual_buffer(struct mausb_data_iter *iterator,
+				      void *buffer, u32 size)
+{
+	u32 rem_space   = 0;
+	u32 write_count = 0;
+
+	if (!buffer || !size)
+		return write_count;
+
+	rem_space   = iterator->length - iterator->offset;
+	write_count = min(size, rem_space);
+
+	if (write_count > 0) {
+		void *location = shift_ptr(iterator->buffer, iterator->offset);
+
+		memcpy(location, buffer, write_count);
+		iterator->offset += write_count;
+	}
+
+	return write_count;
+}
+
+static u32 mausb_write_scatterlist_buffer(struct mausb_data_iter *iterator,
+					  void *buffer, u32 size)
+{
+	u32 current_sg_rem_space;
+	u32 count = 0;
+	u32 total_count = 0;
+	void *location = NULL;
+
+	if (!buffer || !size)
+		return count;
+
+	while (size) {
+		if (iterator->sg_iter.consumed >= iterator->sg_iter.length) {
+			if (!sg_miter_next(&iterator->sg_iter))
+				break;
+			iterator->sg_iter.consumed = 0;
+		}
+
+		current_sg_rem_space = (u32)(iterator->sg_iter.length -
+			iterator->sg_iter.consumed);
+
+		count = min(size, current_sg_rem_space);
+		total_count += count;
+
+		location = shift_ptr(iterator->sg_iter.addr,
+				     iterator->sg_iter.consumed);
+
+		memcpy(location, buffer, count);
+
+		buffer = shift_ptr(buffer, count);
+		size -= count;
+		iterator->sg_iter.consumed += count;
+	}
+
+	return total_count;
+}
+
+int mausb_data_iterator_read(struct mausb_data_iter *iterator,
+			     u32 byte_num,
+			     struct list_head *data_chunks_list,
+			     u32 *data_chunks_num)
+{
+	if (iterator->buffer)
+		return mausb_read_virtual_buffer(iterator, byte_num,
+						 data_chunks_list,
+						 data_chunks_num);
+	else
+		return mausb_read_scatterlist_buffer(iterator, byte_num,
+						     data_chunks_list,
+						     data_chunks_num);
+}
+
+u32 mausb_data_iterator_write(struct mausb_data_iter *iterator, void *buffer,
+			      u32 length)
+{
+	if (iterator->buffer)
+		return mausb_write_virtual_buffer(iterator, buffer, length);
+	else
+		return mausb_write_scatterlist_buffer(iterator, buffer, length);
+}
+
+static inline void mausb_seek_virtual_buffer(struct mausb_data_iter *iterator,
+					     u32 seek_delta)
+{
+	iterator->offset += min(seek_delta, iterator->length -
+					    iterator->offset);
+}
+
+static void mausb_seek_scatterlist_buffer(struct mausb_data_iter *iterator,
+					  u32 seek_delta)
+{
+	u32 rem_bytes_in_current_scatter;
+
+	while (seek_delta) {
+		rem_bytes_in_current_scatter = (u32)(iterator->sg_iter.length -
+						iterator->sg_iter.consumed);
+		if (rem_bytes_in_current_scatter <= seek_delta) {
+			iterator->sg_iter.consumed +=
+			    rem_bytes_in_current_scatter;
+			seek_delta -= rem_bytes_in_current_scatter;
+			if (!sg_miter_next(&iterator->sg_iter))
+				break;
+			iterator->sg_iter.consumed = 0;
+		} else {
+			iterator->sg_iter.consumed += seek_delta;
+			break;
+		}
+	}
+}
+
+void mausb_data_iterator_seek(struct mausb_data_iter *iterator,
+			      u32 seek_delta)
+{
+	if (iterator->buffer)
+		mausb_seek_virtual_buffer(iterator, seek_delta);
+	else
+		mausb_seek_scatterlist_buffer(iterator, seek_delta);
+}
+
+static void mausb_calculate_buffer_length(struct mausb_data_iter *iterator)
+{
+	/* Calculate buffer length */
+	if (iterator->buffer_len > 0) {
+		/* Transfer_buffer_length is populated */
+		iterator->length = iterator->buffer_len;
+	} else if (iterator->sg && iterator->num_sgs != 0) {
+		/* Transfer_buffer_length is not populated */
+		sg_miter_start(&iterator->sg_iter, iterator->sg,
+			       iterator->num_sgs, iterator->flags);
+		while (sg_miter_next(&iterator->sg_iter))
+			iterator->length += (u32)iterator->sg_iter.length;
+		sg_miter_stop(&iterator->sg_iter);
+	} else {
+		iterator->length = 0;
+	}
+}
+
+void mausb_init_data_iterator(struct mausb_data_iter *iterator, void *buffer,
+			      u32 buffer_len, struct scatterlist *sg,
+			      unsigned int num_sgs, bool direction)
+{
+	iterator->offset = 0;
+	iterator->buffer     = buffer;
+	iterator->buffer_len = buffer_len;
+	iterator->length     = 0;
+	iterator->sg	     = sg;
+	iterator->num_sgs    = num_sgs;
+	iterator->sg_started = 0;
+
+	mausb_calculate_buffer_length(iterator);
+
+	if (!buffer && sg && num_sgs != 0) {
+		/* Scatterlist provided */
+		iterator->flags = direction ? SG_MITER_TO_SG : SG_MITER_FROM_SG;
+		sg_miter_start(&iterator->sg_iter, sg, num_sgs,
+			       iterator->flags);
+		iterator->sg_started = 1;
+	}
+}
+
+void mausb_uninit_data_iterator(struct mausb_data_iter *iterator)
+{
+	iterator->offset     = 0;
+	iterator->length     = 0;
+	iterator->buffer     = NULL;
+	iterator->buffer_len = 0;
+
+	if (iterator->sg_started)
+		sg_miter_stop(&iterator->sg_iter);
+
+	iterator->sg_started = 0;
+}
+
+void mausb_reset_data_iterator(struct mausb_data_iter *iterator)
+{
+	iterator->offset = 0;
+	if (iterator->sg_started) {
+		sg_miter_stop(&iterator->sg_iter);
+		iterator->sg_started = 0;
+	}
+
+	if (!iterator->buffer && iterator->sg && iterator->num_sgs != 0) {
+		sg_miter_start(&iterator->sg_iter, iterator->sg,
+			       iterator->num_sgs, iterator->flags);
+		iterator->sg_started = 1;
+	}
+}
+
+u32 mausb_data_iterator_length(struct mausb_data_iter *iterator)
+{
+	return iterator->length;
+}
+
+static int mausb_ring_buffer_get(struct mausb_ring_buffer *ring,
+				 struct mausb_event *event)
+{
+	unsigned long flags = 0;
+
+	spin_lock_irqsave(&ring->lock, flags);
+	if (CIRC_CNT(ring->head, ring->tail, MAUSB_RING_BUFFER_SIZE) < 1) {
+		spin_unlock_irqrestore(&ring->lock, flags);
+		return -ENOSPC;
+	}
+	memcpy(event, ring->to_user_buffer + ring->tail, sizeof(*event));
+	mausb_pr_debug("HEAD=%d, TAIL=%d", ring->head, ring->tail);
+	ring->tail = (ring->tail + 1) & (MAUSB_RING_BUFFER_SIZE - 1);
+	mausb_pr_debug("HEAD=%d, TAIL=%d", ring->head, ring->tail);
+	spin_unlock_irqrestore(&ring->lock, flags);
+	return 0;
+}
+
+int mausb_ring_buffer_init(struct mausb_ring_buffer *ring)
+{
+	unsigned int page_order =
+		mausb_get_page_order(2 * MAUSB_RING_BUFFER_SIZE,
+				     sizeof(struct mausb_event));
+	ring->to_user_buffer =
+		(struct mausb_event *)__get_free_pages(GFP_KERNEL, page_order);
+	if (!ring->to_user_buffer)
+		return -ENOMEM;
+	ring->from_user_buffer = ring->to_user_buffer + MAUSB_RING_BUFFER_SIZE;
+	ring->head = 0;
+	ring->tail = 0;
+	ring->current_from_user = 0;
+	ring->buffer_full = false;
+	spin_lock_init(&ring->lock);
+
+	return 0;
+}
+
+int mausb_ring_buffer_put(struct mausb_ring_buffer *ring,
+			  struct mausb_event *event)
+{
+	unsigned long flags = 0;
+
+	spin_lock_irqsave(&ring->lock, flags);
+
+	if (ring->buffer_full) {
+		mausb_pr_err("Ring buffer is full");
+		spin_unlock_irqrestore(&ring->lock, flags);
+		return -ENOSPC;
+	}
+
+	if (CIRC_SPACE(ring->head, ring->tail, MAUSB_RING_BUFFER_SIZE) < 2) {
+		mausb_pr_err("Ring buffer capacity exceeded, disconnecting device");
+		ring->buffer_full = true;
+		mausb_disconect_event_unsafe(ring, event->madev_addr);
+		ring->head = (ring->head + 1) & (MAUSB_RING_BUFFER_SIZE - 1);
+		spin_unlock_irqrestore(&ring->lock, flags);
+		return -ENOSPC;
+	}
+	memcpy(ring->to_user_buffer + ring->head, event, sizeof(*event));
+	mausb_pr_debug("HEAD=%d, TAIL=%d", ring->head, ring->tail);
+	ring->head = (ring->head + 1) & (MAUSB_RING_BUFFER_SIZE - 1);
+	mausb_pr_debug("HEAD=%d, TAIL=%d", ring->head, ring->tail);
+	spin_unlock_irqrestore(&ring->lock, flags);
+	return 0;
+}
+
+int mausb_ring_buffer_move_tail(struct mausb_ring_buffer *ring, u32 count)
+{
+	unsigned long flags = 0;
+
+	spin_lock_irqsave(&ring->lock, flags);
+	if (CIRC_CNT(ring->head, ring->tail, MAUSB_RING_BUFFER_SIZE) < count) {
+		spin_unlock_irqrestore(&ring->lock, flags);
+		return -ENOSPC;
+	}
+	mausb_pr_debug("old HEAD=%d, TAIL=%d", ring->head, ring->tail);
+	ring->tail = (ring->tail + (int)count) & (MAUSB_RING_BUFFER_SIZE - 1);
+	mausb_pr_debug("new HEAD=%d, TAIL=%d", ring->head, ring->tail);
+	spin_unlock_irqrestore(&ring->lock, flags);
+	return 0;
+}
+
+void mausb_ring_buffer_cleanup(struct mausb_ring_buffer *ring)
+{
+	struct mausb_event event;
+
+	while (mausb_ring_buffer_get(ring, &event) == 0)
+		mausb_cleanup_ring_buffer_event(&event);
+}
+
+void mausb_ring_buffer_destroy(struct mausb_ring_buffer *ring)
+{
+	unsigned int page_order =
+		mausb_get_page_order(2 * MAUSB_RING_BUFFER_SIZE,
+				     sizeof(struct mausb_event));
+	if (ring && ring->to_user_buffer)
+		free_pages((unsigned long)ring->to_user_buffer, page_order);
+}
+
+void mausb_cleanup_ring_buffer_event(struct mausb_event *event)
+{
+	mausb_pr_debug("event=%d", event->type);
+	switch (event->type) {
+	case MAUSB_EVENT_TYPE_SEND_DATA_MSG:
+		mausb_cleanup_send_data_msg_event(event);
+		break;
+	case MAUSB_EVENT_TYPE_RECEIVED_DATA_MSG:
+		mausb_cleanup_received_data_msg_event(event);
+		break;
+	case MAUSB_EVENT_TYPE_DELETE_DATA_TRANSFER:
+		mausb_cleanup_delete_data_transfer_event(event);
+		break;
+	case MAUSB_EVENT_TYPE_NONE:
+		break;
+	default:
+		mausb_pr_warn("Unknown event type");
+		break;
+	}
+}
+
+void mausb_disconect_event_unsafe(struct mausb_ring_buffer *ring,
+				  uint8_t madev_addr)
+{
+	struct mausb_event disconnect_event;
+	struct mausb_device *dev = mausb_get_dev_from_addr_unsafe(madev_addr);
+
+	if (!dev) {
+		mausb_pr_err("Device not found, madev_addr=%#x", madev_addr);
+		return;
+	}
+
+	disconnect_event.type = MAUSB_EVENT_TYPE_DEV_DISCONNECT;
+	disconnect_event.status = -EINVAL;
+	disconnect_event.madev_addr = madev_addr;
+
+	memcpy(ring->to_user_buffer + ring->head, &disconnect_event,
+	       sizeof(disconnect_event));
+
+	mausb_pr_info("Disconnect event added to ring buffer for madev_addr=%#x",
+		      madev_addr);
+	mausb_pr_info("Adding hcd_disconnect_work to dev workq, madev_addr=%#x",
+		      madev_addr);
+	queue_work(dev->workq, &dev->hcd_disconnect_work);
 }

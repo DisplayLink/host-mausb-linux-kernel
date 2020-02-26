@@ -1,13 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 - 2020 DisplayLink (UK) Ltd.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
-#ifndef __MAUSB_COMMON_MAUSB_ADDRESS_H__
-#define __MAUSB_COMMON_MAUSB_ADDRESS_H__
+#ifndef __MAUSB_MAUSB_ADDRESS_H__
+#define __MAUSB_MAUSB_ADDRESS_H__
 
 #ifdef __KERNEL__
 #include <linux/types.h>
@@ -35,4 +31,4 @@ struct mausb_device_address {
 	} ip;
 };
 
-#endif /* __MAUSB_COMMON_MAUSB_ADDRESS_H__ */
+#endif /* __MAUSB_MAUSB_ADDRESS_H__ */

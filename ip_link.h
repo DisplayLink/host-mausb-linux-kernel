@@ -1,13 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2019 - 2020 DisplayLink (UK) Ltd.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
-#ifndef __MAUSB_LINK_MAUSB_IP_LINK_H__
-#define __MAUSB_LINK_MAUSB_IP_LINK_H__
+#ifndef __MAUSB_IP_LINK_H__
+#define __MAUSB_IP_LINK_H__
 
 #include <linux/inet.h>
 #include <linux/list.h>
@@ -84,4 +80,4 @@ int mausb_ip_send(struct mausb_ip_ctx *ip_ctx,
 void mausb_destroy_ip_ctx(struct mausb_ip_ctx *ip_ctx);
 void mausb_ip_connect_async(struct mausb_ip_ctx *ip_ctx);
 
-#endif /* __MAUSB_LINK_MAUSB_IP_LINK_H__ */
+#endif /* __MAUSB_IP_LINK_H__ */
