@@ -6,7 +6,7 @@
 #
 
 obj-$(CONFIG_HOST_MAUSB) += mausb_host.o
-mausb_host-y := mausb_host.o
+mausb_host-y := mausb_core.o
 mausb_host-y += utils.o
 mausb_host-y += ip_link.o
 mausb_host-y += hcd.o
@@ -15,4 +15,3 @@ mausb_host-y += hpal_events.o
 mausb_host-y += hpal_data.o
 
 ccflags-y += -I$(srctree)/$(src)
-ccflags-y += -g

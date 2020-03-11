@@ -93,11 +93,10 @@ static int mausb_device_connect(const char *value,
 
 	mausb_pr_info("Version=%s", MAUSB_DRIVER_VERSION);
 
-	if (strlen(value) <= INET_ADDRSTRLEN) {
-		strcpy(device_address.ip.address.ip4, value);
-		/* Add list of already connected devices */
-	} else if (strlen(value) <= INET6_ADDRSTRLEN) {
-		/* Logic for ip6 */
+	if (strlen(value) <= INET6_ADDRSTRLEN) {
+		strcpy(device_address.ip.address, value);
+		mausb_pr_info("Processing '%s' address",
+			      device_address.ip.address);
 	} else {
 		mausb_pr_err("Invalid IP format");
 		return 0;
@@ -165,7 +164,7 @@ module_param_cb(client_connect, &mausb_client_connect_ops,
 module_param_cb(client_disconnect, &mausb_client_disconnect_ops,
 		&mausb_client_disconnect_param, 0664);
 module_param_cb(ip, &mausb_device_connect_ops,
-		device_address.ip.address.ip4, 0664);
+		device_address.ip.address, 0664);
 module_param_cb(disconnect, &mausb_device_disconnect_ops,
 		&mausb_device_disconnect_param, 0664);
 
