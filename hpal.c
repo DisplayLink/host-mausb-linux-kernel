@@ -893,7 +893,7 @@ int mausb_initiate_dev_connection(struct mausb_device_address dev_addr,
 	mausb_pr_info("New MAUSB device created madev_addr=%d", madev_address);
 
 	error = mausb_init_ip_ctx(&dev->mgmt_channel, dev->net_ns,
-				  dev->dev_addr.ip.address.ip4,
+				  dev->dev_addr.ip.address,
 				  dev->dev_addr.ip.port.management, dev,
 				  mausb_ip_callback, MAUSB_MGMT_CHANNEL);
 	if (error) {
@@ -929,10 +929,10 @@ int mausb_enqueue_event_from_user(u8 madev_addr, u16 num_of_events,
 		return -EINVAL;
 	}
 
-	spin_lock_irqsave(&dev->num_of_user_events_lock, flags);
+	spin_lock(&dev->num_of_user_events_lock);
 	dev->num_of_user_events += num_of_events;
 	dev->num_of_completed_events += num_of_completed;
-	spin_unlock_irqrestore(&dev->num_of_user_events_lock, flags);
+	spin_unlock(&dev->num_of_user_events_lock);
 	queue_work(dev->workq, &dev->work);
 	spin_unlock_irqrestore(&mss.lock, flags);
 
@@ -1543,7 +1543,7 @@ static void mausb_init_ip_ctx_helper(struct mausb_device *dev,
 				     enum mausb_channel channel)
 {
 	int status = mausb_init_ip_ctx(ip_ctx, dev->net_ns,
-				       dev->dev_addr.ip.address.ip4, port, dev,
+				       dev->dev_addr.ip.address, port, dev,
 				       mausb_ip_callback, channel);
 	if (status < 0) {
 		mausb_pr_err("Init ip context failed with error=%d", status);

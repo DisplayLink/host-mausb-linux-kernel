@@ -44,9 +44,26 @@ int mausb_init_ip_ctx(struct mausb_ip_ctx **ip_ctx,
 	ctx = *ip_ctx;
 	ctx->client_socket = NULL;
 	__mausb_ip_recv_ctx_clear(&ctx->recv_ctx);
-	/* something safer than strcpy */
-	strcpy(ctx->ip_addr, ip_addr);
-	ctx->port = port;
+
+	if (in4_pton(ip_addr, -1,
+		     (u8 *)&ctx->dev_addr_in.sa_in.sin_addr.s_addr, -1,
+		     NULL) == 1) {
+		ctx->dev_addr_in.sa_in.sin_family = AF_INET;
+		ctx->dev_addr_in.sa_in.sin_port = htons(port);
+#if IS_ENABLED(CONFIG_IPV6)
+	} else if (in6_pton(ip_addr, -1,
+			    (u8 *)&ctx->dev_addr_in.sa_in6.sin6_addr.in6_u, -1,
+			    NULL) == 1) {
+		ctx->dev_addr_in.sa_in6.sin6_family = AF_INET6;
+		ctx->dev_addr_in.sa_in6.sin6_port = htons(port);
+#endif
+	} else {
+		mausb_pr_err("Invalid IP address received: address=%s",
+			     ip_addr);
+		kfree(ctx);
+		return -EINVAL;
+	}
+
 	ctx->net_ns = net_ns;
 
 	if (channel == MAUSB_ISOCH_CHANNEL)
@@ -165,18 +182,20 @@ static void __mausb_ip_set_options(struct socket *sock, bool udp)
 
 static void __mausb_ip_connect(struct work_struct *work)
 {
-	struct sockaddr_in sockaddr;
 	int status = 0;
-
+	struct sockaddr *sa;
+	int sa_size;
 	struct mausb_ip_ctx *ip_ctx = container_of(work, struct mausb_ip_ctx,
 						   connect_work);
+	unsigned short int family = ip_ctx->dev_addr_in.sa_in.sin_family;
 
 	if (!ip_ctx->udp) {
 #if KERNEL_VERSION(4, 2, 0) <= LINUX_VERSION_CODE
-		status = sock_create_kern(ip_ctx->net_ns, AF_INET, SOCK_STREAM,
-					  IPPROTO_TCP, &ip_ctx->client_socket);
+		status = sock_create_kern(ip_ctx->net_ns, family,
+					  SOCK_STREAM, IPPROTO_TCP,
+					  &ip_ctx->client_socket);
 #else
-		status = sock_create(AF_INET, SOCK_STREAM, IPPROTO_TCP,
+		status = sock_create(family, SOCK_STREAM, IPPROTO_TCP,
 				     &ip_ctx->client_socket);
 #endif /* #if KERNEL_VERSION(4, 2, 0) <= LINUX_VERSION_CODE */
 		if (status < 0) {
@@ -186,10 +205,10 @@ static void __mausb_ip_connect(struct work_struct *work)
 		}
 	} else {
 #if KERNEL_VERSION(4, 2, 0) <= LINUX_VERSION_CODE
-		status = sock_create_kern(ip_ctx->net_ns, AF_INET, SOCK_DGRAM,
+		status = sock_create_kern(ip_ctx->net_ns, family, SOCK_DGRAM,
 					  IPPROTO_UDP, &ip_ctx->client_socket);
 #else
-		status = sock_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP,
+		status = sock_create(family, SOCK_DGRAM, IPPROTO_UDP,
 				     &ip_ctx->client_socket);
 #endif /* #if KERNEL_VERSION(4, 2, 0) <= LINUX_VERSION_CODE */
 		if (status < 0) {
@@ -199,26 +218,38 @@ static void __mausb_ip_connect(struct work_struct *work)
 		}
 	}
 
-	memset(&sockaddr, 0, sizeof(sockaddr));
-	sockaddr.sin_family	 = AF_INET;
-	sockaddr.sin_port	 = htons(ip_ctx->port);
-	sockaddr.sin_addr.s_addr = in_aton(ip_ctx->ip_addr);
-
 	__mausb_ip_set_options((struct socket *)ip_ctx->client_socket,
 			       ip_ctx->udp);
 
-	status = kernel_connect(ip_ctx->client_socket,
-				(struct sockaddr *)&sockaddr, sizeof(sockaddr),
-				O_RDWR);
+	if (family == AF_INET) {
+		sa = (struct sockaddr *)&ip_ctx->dev_addr_in.sa_in;
+		sa_size = sizeof(ip_ctx->dev_addr_in.sa_in);
+		mausb_pr_info("Connecting to %pI4:%d, status=%d",
+			      &ip_ctx->dev_addr_in.sa_in.sin_addr,
+			      htons(ip_ctx->dev_addr_in.sa_in.sin_port),
+			      status);
+#if IS_ENABLED(CONFIG_IPV6)
+	} else if (family == AF_INET6) {
+		sa = (struct sockaddr *)&ip_ctx->dev_addr_in.sa_in6;
+		sa_size = sizeof(ip_ctx->dev_addr_in.sa_in6);
+		mausb_pr_info("Connecting to %pI6c:%d, status=%d",
+			      &ip_ctx->dev_addr_in.sa_in6.sin6_addr,
+			      htons(ip_ctx->dev_addr_in.sa_in6.sin6_port),
+			      status);
+#endif
+	} else {
+		mausb_pr_err("Wrong network family provided");
+		status = -EINVAL;
+		goto callback;
+	}
+
+	status = kernel_connect(ip_ctx->client_socket, sa, sa_size, O_RDWR);
 	if (status < 0) {
-		mausb_pr_err("Failed to connect to host %s:%d, status=%d",
-			     ip_ctx->ip_addr, ip_ctx->port, status);
+		mausb_pr_err("Failed to connect to host, status=%d", status);
 		goto clear_socket;
 	}
 
 	queue_work(ip_ctx->recv_workq, &ip_ctx->recv_work);
-	mausb_pr_info("Connected to host %s:%d, status=%d", ip_ctx->ip_addr,
-		      ip_ctx->port, status);
 
 	goto callback;
 
@@ -302,8 +333,7 @@ static int __mausb_ip_recv(struct mausb_ip_ctx *ip_ctx)
 						   (char *)&optval,
 						   sizeof(optval));
 			if (status != 0) {
-				mausb_pr_warn("Setting TCP_QUICKACK failed: %s:%d, status=%d",
-					      ip_ctx->ip_addr, ip_ctx->port,
+				mausb_pr_warn("Setting TCP_QUICKACK failed, status=%d",
 					      status);
 			}
 		}
@@ -313,8 +343,7 @@ static int __mausb_ip_recv(struct mausb_ip_ctx *ip_ctx)
 		if (status == -EAGAIN) {
 			return -EAGAIN;
 		} else if (status <= 0) {
-			mausb_pr_warn("kernel_recvmsg host %s:%d, status=%d",
-				      ip_ctx->ip_addr, ip_ctx->port, status);
+			mausb_pr_warn("kernel_recvmsg, status=%d", status);
 
 			__mausb_ip_recv_ctx_free(&ip_ctx->recv_ctx);
 			ip_ctx->fn_callback(ip_ctx->ctx, ip_ctx->channel,
@@ -322,8 +351,7 @@ static int __mausb_ip_recv(struct mausb_ip_ctx *ip_ctx)
 			return status;
 		}
 
-		mausb_pr_debug("kernel_recvmsg host %s:%d, status=%d",
-			       ip_ctx->ip_addr, ip_ctx->port, status);
+		mausb_pr_debug("kernel_recvmsg, status=%d", status);
 
 		if (peek) {
 			if ((unsigned int)status <

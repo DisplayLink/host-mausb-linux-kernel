@@ -42,11 +42,15 @@ struct mausb_ip_recv_ctx {
 };
 
 struct mausb_ip_ctx {
-	struct socket *client_socket;
-	struct net    *net_ns;
-	char	      ip_addr[INET6_ADDRSTRLEN];
-	u16	      port;
-	bool	      udp;
+	struct socket		*client_socket;
+	union {
+		struct sockaddr_in sa_in;
+#if IS_ENABLED(CONFIG_IPV6)
+		struct sockaddr_in6 sa_in6;
+#endif
+	} dev_addr_in;
+	struct net		*net_ns;
+	bool			udp;
 
 	/* Queues to schedule rx work */
 	struct workqueue_struct	*recv_workq;
