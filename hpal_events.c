@@ -41,7 +41,7 @@ static int mausb_data_msg_received_event(struct mausb_event *event,
 	event->data.transfer_type = mausb_transfer_type_from_hdr(hdr);
 	event->data.device_id	  = (u16)((hdr->ssid << 8) | hdr->dev_addr);
 	event->data.ep_handle	  = hdr->handle.epv;
-	event->data.recv_buf	  = (u64)hdr;
+	event->data.recv_buf	  = (uintptr_t)hdr;
 
 	memcpy(event->data.hdr, hdr, MAUSB_TRANSFER_HDR_SIZE);
 
@@ -63,7 +63,7 @@ static int mausb_isoch_msg_received_event(struct mausb_event *event,
 	event->data.transfer_type = mausb_transfer_type_from_hdr(hdr);
 	event->data.device_id	  = (u16)((hdr->ssid << 8) | hdr->dev_addr);
 	event->data.ep_handle	  = hdr->handle.epv;
-	event->data.recv_buf	  = (u64)hdr;
+	event->data.recv_buf	  = (uintptr_t)hdr;
 
 	memcpy(event->data.hdr, hdr, MAUSB_TRANSFER_HDR_SIZE);
 
@@ -82,8 +82,8 @@ int mausb_msg_received_event(struct mausb_event *event,
 	else if (hdr->type == MA_USB_HDR_TYPE_DATA_RESP(ISOCHTRANSFER))
 		return mausb_isoch_msg_received_event(event, hdr, channel);
 
-	kfree(hdr);
 	mausb_pr_warn("Unknown event type event=%d", hdr->type);
+	kfree(hdr);
 	return -EBADR;
 }
 
@@ -550,8 +550,8 @@ int mausb_usbdevreset_event_from_user(struct mausb_device *dev,
 }
 
 int mausb_canceltransfer_event_to_user(struct mausb_device *dev,
-				       u16 device_handle,
-				       u16 ep_handle, u64 urb)
+				       u16 device_handle, u16 ep_handle,
+				       uintptr_t urb)
 {
 	struct mausb_event event;
 	int status;

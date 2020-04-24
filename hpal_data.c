@@ -395,9 +395,9 @@ static void __mausb_process_in_isoch_std_resp(struct mausb_event *event,
 	}
 }
 
-int mausb_receive_isoch_in_data(struct mausb_device *dev,
-				struct mausb_event *event,
-				struct mausb_urb_ctx *urb_ctx)
+void mausb_receive_isoch_in_data(struct mausb_device *dev,
+				 struct mausb_event *event,
+				 struct mausb_urb_ctx *urb_ctx)
 {
 	struct ma_usb_hdr_common *common_hdr =
 			(struct ma_usb_hdr_common *)event->data.recv_buf;
@@ -421,8 +421,6 @@ int mausb_receive_isoch_in_data(struct mausb_device *dev,
 		mausb_pr_err("Isoc header error in response: ep_handle=%#x, req_id=%#x",
 			     event->data.ep_handle, transfer_hdr->req_id);
 	}
-
-	return 0;
 }
 
 static inline u32
@@ -519,6 +517,7 @@ mausb_init_isoch_out_header_chunk(struct ma_usb_hdr_common *common_hdr,
 	u32 header_size =
 		__mausb_calculate_isoch_common_header_size(num_of_packets);
 	int status = mausb_add_data_chunk(common_hdr, header_size, chunks_list);
+
 	if (!status)
 		++(*num_of_data_chunks);
 
@@ -699,10 +698,9 @@ int mausb_send_isoch_out_msg(struct mausb_device *ma_dev,
 	return 0;
 }
 
-int mausb_receive_isoch_out(struct mausb_event *event)
+void mausb_receive_isoch_out(struct mausb_event *event)
 {
 	struct urb *urb = (struct urb *)event->data.urb;
-	int status = 0;
 	u16 i;
 
 	mausb_pr_debug("transfer_size=%d, rem_transfer_size=%d, status=%d",
@@ -713,6 +711,4 @@ int mausb_receive_isoch_out(struct mausb_event *event)
 		urb->iso_frame_desc[i].status = event->status;
 
 	mausb_complete_request(urb, event->data.payload_size, event->status);
-
-	return status;
 }

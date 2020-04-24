@@ -1177,10 +1177,6 @@ mausb_alloc_device_ctx(struct hub_ctx *hub, struct usb_device *dev,
 	return usb_device_ctx;
 }
 
-/*
- * For usb 2.0 logitech camera called multiple times, once during
- * enumeration of device and later after mausb_reset_device.
- */
 static int mausb_address_device(struct usb_hcd *hcd, struct usb_device *dev)
 {
 	u8	port_number;
@@ -1244,8 +1240,8 @@ static int mausb_address_device(struct usb_hcd *hcd, struct usb_device *dev)
 	}
 
 	/*
-	 * Fix to support usb 2.0 logitech camera. If endoint handle of usb 2.0
-	 * device is already modified, do not modify it again.
+	 * If endpoint handle of usb 2.0 device is already modified,
+	 * do not modify it again.
 	 */
 	if (dev->speed < USB_SPEED_SUPER && endpoint_ctx->ep_handle != 0)
 		return 0;
@@ -1520,11 +1516,6 @@ static int mausb_device_assign_dev_handle(struct usb_hcd *hcd,
 	return 0;
 }
 
-/*
- * For usb 2.0 logitech camera called multiple times, once during enumeration
- * of device and later after mausb_reset_device. In latter case it is
- * required to address the device again in order for ep0 to work properly.
- */
 static int mausb_enable_device(struct usb_hcd *hcd, struct usb_device *dev)
 {
 	int status;
@@ -1566,9 +1557,6 @@ static int mausb_enable_device(struct usb_hcd *hcd, struct usb_device *dev)
 		return mausb_device_assign_dev_handle(hcd, dev, hub, ma_dev,
 						      usb_device_ctx);
 
-	/*
-	 * Fix for usb 2.0 logitech camera
-	 */
 	if (!usb_device_ctx->addressed)
 		return mausb_device_assign_address(ma_dev, usb_device_ctx);
 
@@ -1830,11 +1818,6 @@ static void mausb_endpoint_reset(struct usb_hcd *hcd,
 		      status, ep_ctx->ep_handle, dev_handle);
 }
 
-/*
- * For usb 2.0 logitech camera called multiple times,
- * followed by either mausb_enable_device or mausb_address_device.
- * Resets device to non-addressed state.
- */
 static int mausb_reset_device(struct usb_hcd *hcd, struct usb_device *dev)
 {
 	int status;

@@ -34,7 +34,7 @@
 #define MAUSB_STRINGIFY2(x) #x
 #define MAUSB_STRINGIFY(x) MAUSB_STRINGIFY2(x)
 
-#define MAUSB_DRIVER_VERSION MAUSB_STRINGIFY(1.2.0.0.93dd7d51)
+#define MAUSB_DRIVER_VERSION MAUSB_STRINGIFY(1.3.0.0.781d5ee5)
 
 int mausb_create_dev(void);
 void mausb_cleanup_dev(int device_created);

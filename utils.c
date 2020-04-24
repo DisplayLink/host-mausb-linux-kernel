@@ -106,8 +106,8 @@ static ssize_t mausb_file_read(struct file *filp, char __user *user_buffer,
 	mausb_reset_heartbeat_cnt();
 
 	if ((ssize_t)size != num_of_bytes_to_read) {
-		mausb_pr_alert("Different expected bytes to read (%ld) from actual size (%ld)",
-			       num_of_bytes_to_read, size);
+		mausb_pr_alert("The actual size differs from the expected number of bytes");
+
 		fail_ret_val = MAUSB_DRIVER_BAD_READ_BUFFER_SIZE;
 		if (copy_to_user(user_buffer, &fail_ret_val,
 				 sizeof(fail_ret_val)) != 0) {
@@ -172,7 +172,7 @@ static ssize_t mausb_file_read(struct file *filp, char __user *user_buffer,
 		copy_to_user(user_buffer, &mss.events,
 			     (unsigned long)num_of_bytes_to_read);
 
-	mausb_pr_debug("num_of_bytes_not_copied %ld, num_of_bytes_to_read %ld",
+	mausb_pr_debug("num_of_bytes_not_copied %lu, num_of_bytes_to_read %zd",
 		       num_of_bytes_not_copied, num_of_bytes_to_read);
 
 	if (num_of_bytes_not_copied) {
@@ -197,8 +197,8 @@ static ssize_t mausb_file_write(struct file *filp, const char __user *buffer,
 	struct mausb_device *dev;
 
 	if (size != (size_t)num_of_bytes_to_write) {
-		mausb_pr_alert("Different expected bytes to write (%ld) from actual size (%ld)",
-			       num_of_bytes_to_write, size);
+		mausb_pr_alert("The actual size differs from the expected number of bytes");
+
 		return MAUSB_DRIVER_WRITE_ERROR;
 	}
 
@@ -213,10 +213,10 @@ static ssize_t mausb_file_write(struct file *filp, const char __user *buffer,
 		return 0;
 	}
 
-	spin_lock_irqsave(&dev->num_of_user_events_lock, flags);
+	spin_lock(&dev->num_of_user_events_lock);
 	dev->num_of_user_events += notification.num_of_events;
 	dev->num_of_completed_events += notification.num_of_completed_events;
-	spin_unlock_irqrestore(&dev->num_of_user_events_lock, flags);
+	spin_unlock(&dev->num_of_user_events_lock);
 
 	queue_work(dev->workq, &dev->work);
 	spin_unlock_irqrestore(&mss.lock, flags);

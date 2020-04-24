@@ -171,8 +171,8 @@ struct mausb_mgmt_event {
 };
 
 struct mausb_data_event {
-	u64 urb;
-	u64 recv_buf;
+	uintptr_t urb;
+	uintptr_t recv_buf;
 	u32 iterator_seek_delta;
 	u32 transfer_size;
 	u32 rem_transfer_size;

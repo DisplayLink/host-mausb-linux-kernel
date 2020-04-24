@@ -971,7 +971,7 @@ int mausb_data_req_enqueue_event(struct mausb_device *dev, u16 ep_handle,
 		mausb_transfer_type_from_usb(&request->ep->desc);
 	mausb_event.data.device_id	= dev->id;
 	mausb_event.data.ep_handle	= ep_handle;
-	mausb_event.data.urb		= (u64)request;
+	mausb_event.data.urb		= (uintptr_t)request;
 	mausb_event.data.setup_packet	=
 		(usb_endpoint_xfer_control(&request->ep->desc) &&
 			request->setup_packet);
@@ -1126,7 +1126,7 @@ static void mausb_execute_urb_dequeue(struct work_struct *dequeue_work)
 		status = mausb_canceltransfer_event_to_user(ep_ctx->ma_dev,
 							    ep_ctx->dev_handle,
 							    ep_ctx->ep_handle,
-							    (u64)urb);
+							    (uintptr_t)urb);
 		if (status < 0) {
 			mausb_pr_err("Failed to enqueue cancel transfer to user");
 			goto complete_urb;
@@ -1142,7 +1142,7 @@ static void mausb_execute_urb_dequeue(struct work_struct *dequeue_work)
 				mausb_transfer_type_from_usb(&urb->ep->desc);
 	mausb_event.data.device_id     = ma_dev->id;
 	mausb_event.data.ep_handle     = ep_ctx->ep_handle;
-	mausb_event.data.urb	       = (u64)urb;
+	mausb_event.data.urb	       = (uintptr_t)urb;
 	mausb_event.data.direction     = (usb_urb_dir_in(urb) ?
 						MAUSB_DATA_MSG_DIRECTION_IN :
 						MAUSB_DATA_MSG_DIRECTION_OUT);
@@ -1457,7 +1457,6 @@ int mausb_receive_data_msg(struct mausb_device *dev, struct mausb_event *event)
 	}
 
 	urb_ctx = mausb_find_urb_in_tree((struct urb *)event->data.urb);
-
 	if (!urb_ctx) {
 		/* Transfer will be deleted from dequeue task */
 		mausb_pr_warn("Urb is already cancelled");
@@ -1466,10 +1465,9 @@ int mausb_receive_data_msg(struct mausb_device *dev, struct mausb_event *event)
 
 	if (mausb_isoch_data_event(event)) {
 		if (event->data.direction == MAUSB_DATA_MSG_DIRECTION_IN)
-			status = mausb_receive_isoch_in_data(dev, event,
-							     urb_ctx);
+			mausb_receive_isoch_in_data(dev, event, urb_ctx);
 		else
-			status = mausb_receive_isoch_out(event);
+			mausb_receive_isoch_out(event);
 	} else {
 		if (event->data.direction == MAUSB_DATA_MSG_DIRECTION_IN)
 			mausb_receive_in_data(event, urb_ctx);
@@ -1911,7 +1909,7 @@ void mausb_init_data_iterator(struct mausb_data_iter *iterator, void *buffer,
 	iterator->length     = 0;
 	iterator->sg	     = sg;
 	iterator->num_sgs    = num_sgs;
-	iterator->sg_started = 0;
+	iterator->sg_started = false;
 
 	mausb_calculate_buffer_length(iterator);
 
@@ -1920,7 +1918,7 @@ void mausb_init_data_iterator(struct mausb_data_iter *iterator, void *buffer,
 		iterator->flags = direction ? SG_MITER_TO_SG : SG_MITER_FROM_SG;
 		sg_miter_start(&iterator->sg_iter, sg, num_sgs,
 			       iterator->flags);
-		iterator->sg_started = 1;
+		iterator->sg_started = true;
 	}
 }
 
@@ -1934,7 +1932,7 @@ void mausb_uninit_data_iterator(struct mausb_data_iter *iterator)
 	if (iterator->sg_started)
 		sg_miter_stop(&iterator->sg_iter);
 
-	iterator->sg_started = 0;
+	iterator->sg_started = false;
 }
 
 void mausb_reset_data_iterator(struct mausb_data_iter *iterator)
@@ -1942,13 +1940,13 @@ void mausb_reset_data_iterator(struct mausb_data_iter *iterator)
 	iterator->offset = 0;
 	if (iterator->sg_started) {
 		sg_miter_stop(&iterator->sg_iter);
-		iterator->sg_started = 0;
+		iterator->sg_started = false;
 	}
 
 	if (!iterator->buffer && iterator->sg && iterator->num_sgs != 0) {
 		sg_miter_start(&iterator->sg_iter, iterator->sg,
 			       iterator->num_sgs, iterator->flags);
-		iterator->sg_started = 1;
+		iterator->sg_started = true;
 	}
 }
 

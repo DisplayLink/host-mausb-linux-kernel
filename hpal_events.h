@@ -72,8 +72,8 @@ int mausb_usbdevreset_event_to_user(struct mausb_device *dev,
 int mausb_usbdevreset_event_from_user(struct mausb_device *dev,
 				      struct mausb_event *event);
 int mausb_canceltransfer_event_to_user(struct mausb_device *dev,
-				       u16 device_handle,
-				       u16 ep_handle, u64 urb);
+				       u16 device_handle, u16 ep_handle,
+				       uintptr_t urb);
 int mausb_canceltransfer_event_from_user(struct mausb_device *dev,
 					 struct mausb_event *event);
 

@@ -6,9 +6,11 @@
 #
 
 config HOST_MAUSB
-	tristate "MA-USB Host Driver"
+	tristate "Media Agnostic (MA) USB Host Driver"
 	depends on USB=y
 	default y
 	help
-		This is a MA-USB Host driver which enables host communication
-		via MA-USB protocol stack.
+	  This is a Media Agnostic (MA) USB Host driver which enables host
+	  communication via MA USB protocol stack.
+
+	  If this driver is compiled as a module, it will be named mausb_host.
