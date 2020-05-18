@@ -2,23 +2,17 @@
 /*
  * Copyright (c) 2019 - 2020 DisplayLink (UK) Ltd.
  */
-#include <linux/in.h>
-#include <linux/inet.h>
-#include <linux/init.h>
-#include <linux/kernel.h>
-#include <linux/kobject.h>
 #include <linux/module.h>
-#include <linux/moduleparam.h>
-#include <linux/net.h>
 
 #include "hcd.h"
-#include "hpal.h"
 #include "mausb_address.h"
 #include "utils.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("DisplayLink (UK) Ltd.");
+#ifdef DKMS_BUILD
 MODULE_VERSION(MAUSB_DRIVER_VERSION);
+#endif
 
 static struct mausb_device_address	device_address;
 static int				mausb_device_disconnect_param;
@@ -31,11 +25,9 @@ static int mausb_client_connect(const char *value,
 {
 	unsigned long flags = 0;
 
-	mausb_pr_info("Version=%s", MAUSB_DRIVER_VERSION);
-
 	spin_lock_irqsave(&mss.lock, flags);
 	if (mss.client_connected) {
-		mausb_pr_err("MA-USB client is already connected");
+		dev_err(mausb_host_dev.this_device, "MA-USB client is already connected");
 		spin_unlock_irqrestore(&mss.lock, flags);
 		return -EEXIST;
 	}
@@ -57,11 +49,9 @@ static int mausb_client_disconnect(const char *value,
 	unsigned long flags = 0;
 	struct mausb_device *dev = NULL;
 
-	mausb_pr_info("Version=%s", MAUSB_DRIVER_VERSION);
-
 	spin_lock_irqsave(&mss.lock, flags);
 	if (!mss.client_connected) {
-		mausb_pr_err("MA-USB client is not connected");
+		dev_err(mausb_host_dev.this_device, "MA-USB client is not connected");
 		spin_unlock_irqrestore(&mss.lock, flags);
 		return -ENODEV;
 	}
@@ -76,8 +66,8 @@ static int mausb_client_disconnect(const char *value,
 	mss.client_connected = false;
 	mss.missed_heartbeats = 0;
 	list_for_each_entry(dev, &mss.madev_list, list_entry) {
-		mausb_pr_debug("Enqueue heartbeat_work madev_addr=%x",
-			       dev->madev_addr);
+		dev_vdbg(mausb_host_dev.this_device, "Enqueue heartbeat_work madev_addr=%x",
+			 dev->madev_addr);
 		queue_work(dev->workq, &dev->heartbeat_work);
 	}
 	complete(&mss.client_stopped);
@@ -91,14 +81,12 @@ static int mausb_device_connect(const char *value,
 {
 	int status = 0;
 
-	mausb_pr_info("Version=%s", MAUSB_DRIVER_VERSION);
-
 	if (strlen(value) <= INET6_ADDRSTRLEN) {
 		strcpy(device_address.ip.address, value);
-		mausb_pr_info("Processing '%s' address",
-			      device_address.ip.address);
+		dev_info(mausb_host_dev.this_device, "Processing '%s' address",
+			 device_address.ip.address);
 	} else {
-		mausb_pr_err("Invalid IP format");
+		dev_err(mausb_host_dev.this_device, "Invalid IP format");
 		return 0;
 	}
 	status = mausb_initiate_dev_connection(device_address, madev_addr);
@@ -114,8 +102,6 @@ static int mausb_device_disconnect(const char *value,
 	int status = 0;
 	unsigned long flags = 0;
 	struct mausb_device *dev = NULL;
-
-	mausb_pr_info("Version=%s", MAUSB_DRIVER_VERSION);
 
 	status = kstrtou8(value, 0, &dev_address);
 	if (status < 0)
@@ -170,42 +156,38 @@ module_param_cb(disconnect, &mausb_device_disconnect_ops,
 
 static int mausb_host_init(void)
 {
-	int status;
+	int status = mausb_host_dev_register();
 
-	mausb_pr_info("Module load. Version=%s", MAUSB_DRIVER_VERSION);
+	if (status < 0)
+		goto exit;
+
 	status = mausb_init_hcd();
 	if (status < 0)
-		goto cleanup;
+		goto cleanup_dev;
 
 	status = mausb_register_power_state_listener();
 	if (status < 0)
-		goto cleanup_hcd;
-
-	status = mausb_create_dev();
-	if (status < 0)
-		goto unregister_power_state_listener;
+		goto cleanup;
 
 	mausb_initialize_mss();
 
 	return 0;
 
-unregister_power_state_listener:
-	mausb_unregister_power_state_listener();
-cleanup_hcd:
-	mausb_deinit_hcd();
 cleanup:
-	mausb_pr_alert("Failed to load MAUSB module!");
+	mausb_deinit_hcd();
+cleanup_dev:
+	mausb_host_dev_deregister();
+exit:
 	return status;
 }
 
 static void mausb_host_exit(void)
 {
-	mausb_pr_info("Module unloading started...");
+	dev_info(mausb_host_dev.this_device, "Module unloading started...");
 	mausb_unregister_power_state_listener();
 	mausb_deinitialize_mss();
 	mausb_deinit_hcd();
-	mausb_cleanup_dev(1);
-	mausb_pr_info("Module unloaded. Version=%s", MAUSB_DRIVER_VERSION);
+	mausb_host_dev_deregister();
 }
 
 module_init(mausb_host_init);

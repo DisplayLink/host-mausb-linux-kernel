@@ -4,48 +4,28 @@
  */
 #include "hcd.h"
 
-#include <linux/init.h>
-#include <linux/kernel.h>
-#include <linux/limits.h>
-#include <linux/module.h>
+#include <linux/miscdevice.h>
 #include <linux/version.h>
 
-#include "hpal.h"
 #include "hpal_events.h"
 #include "utils.h"
 
-static int mausb_open(struct inode *inode, struct file *file);
-static int mausb_release(struct inode *inode, struct file *file);
-static ssize_t mausb_read(struct file *file, char __user *buffer, size_t length,
-			  loff_t *offset);
-static ssize_t mausb_write(struct file *file, const char __user *buffer,
-			   size_t length, loff_t *offset);
-static long mausb_ioctl(struct file *file, unsigned int ioctl_func,
-			unsigned long ioctl_buffer);
 static int mausb_bus_probe(struct device *dev);
-static int mausb_bus_remove(struct device *dev);
 static int mausb_bus_match(struct device *dev, struct device_driver *drv);
 
-static const struct file_operations mausb_fops = {
-	.open		= mausb_open,
-	.release	= mausb_release,
-	.read		= mausb_read,
-	.write		= mausb_write,
-	.unlocked_ioctl	= mausb_ioctl
-};
+static const struct file_operations mausb_fops;
 
 static unsigned int major;
 static unsigned int minor = 1;
 static dev_t devt;
 static struct device *device;
-
 struct mausb_hcd	*mhcd;
 static struct class	*mausb_class;
+
 static struct bus_type	mausb_bus_type = {
 	.name	= DEVICE_NAME,
 	.match	= mausb_bus_match,
 	.probe	= mausb_bus_probe,
-	.remove	= mausb_bus_remove,
 };
 
 static struct device_driver mausb_driver = {
@@ -77,11 +57,6 @@ static int mausb_bus_probe(struct device *dev)
 	return mausb_probe(dev);
 }
 
-static int mausb_bus_remove(struct device *dev)
-{
-	return 0;
-}
-
 static int mausb_bus_match(struct device *dev, struct device_driver *drv)
 {
 	if (strncmp(dev->bus->name, drv->name, strlen(drv->name)))
@@ -90,62 +65,27 @@ static int mausb_bus_match(struct device *dev, struct device_driver *drv)
 		return 1;
 }
 
-static int mausb_open(struct inode *inode, struct file *file)
-{
-	return 0;
-}
-
-static int mausb_release(struct inode *inode, struct file *file)
-{
-	return 0;
-}
-
-static ssize_t mausb_read(struct file *file, char __user *buffer, size_t length,
-			  loff_t *offset)
-{
-	return 0;
-}
-
-static ssize_t mausb_write(struct file *file, const char __user *buffer,
-			   size_t length, loff_t *offset)
-{
-	return 0;
-}
-
-static long mausb_ioctl(struct file *file, unsigned int ioctl_func,
-			unsigned long ioctl_buffer)
-{
-	return 0;
-}
-
 int mausb_init_hcd(void)
 {
-	int retval;
+	int retval = register_chrdev(0, DEVICE_NAME, &mausb_fops);
 
-	retval = register_chrdev(0, DEVICE_NAME, &mausb_fops);
-	if (retval < 0) {
-		mausb_pr_err("Register_chrdev failed");
+	if (retval < 0)
 		return retval;
-	}
 
 	major = (unsigned int)retval;
 	retval = bus_register(&mausb_bus_type);
-	if (retval) {
-		mausb_pr_err("Bus_register failed %d", retval);
+	if (retval)
 		goto bus_register_error;
-	}
 
 	mausb_class = class_create(THIS_MODULE, CLASS_NAME);
 	if (IS_ERR(mausb_class)) {
-		mausb_pr_err("Class_create failed %ld", PTR_ERR(mausb_class));
+		retval = (int)PTR_ERR(mausb_class);
 		goto class_error;
 	}
 
 	retval = driver_register(&mausb_driver);
-	if (retval) {
-		mausb_pr_err("Driver_register failed");
+	if (retval)
 		goto driver_register_error;
-	}
 
 	mhcd = kzalloc(sizeof(*mhcd), GFP_ATOMIC);
 	if (!mhcd) {
@@ -156,17 +96,15 @@ int mausb_init_hcd(void)
 	devt = MKDEV(major, minor);
 	device = device_create(mausb_class, NULL, devt, mhcd, DEVICE_NAME);
 	if (IS_ERR(device)) {
-		mausb_pr_err("Device_create failed %ld", PTR_ERR(device));
+		retval = (int)IS_ERR(device);
 		goto device_create_error;
 	}
 
 	device->driver = &mausb_driver;
 
 	retval = mausb_probe(device);
-	if (retval) {
-		mausb_pr_err("Mausb_probe failed");
+	if (retval)
 		goto mausb_probe_failed;
-	}
 
 	return retval;
 mausb_probe_failed:
@@ -250,8 +188,8 @@ void mausb_hcd_disconnect(const u16 port_number,
 	unsigned long flags = 0;
 
 	if (port_number >= NUMBER_OF_PORTS) {
-		mausb_pr_err("port number out of range, port_number=%x",
-			     port_number);
+		dev_err(mausb_host_dev.this_device, "port number out of range, port_number=%x",
+			port_number);
 		return;
 	}
 
@@ -303,12 +241,9 @@ static int mausb_add_endpoint(struct usb_hcd *hcd, struct usb_device *dev,
 			      struct usb_host_endpoint *endpoint);
 static int mausb_address_device(struct usb_hcd *hcd, struct usb_device *dev);
 static int mausb_alloc_dev(struct usb_hcd *hcd, struct usb_device *dev);
-static int mausb_check_bandwidth(struct usb_hcd *hcd, struct usb_device *dev);
 static int mausb_drop_endpoint(struct usb_hcd *hcd, struct usb_device *dev,
 			       struct usb_host_endpoint *endpoint);
 static int mausb_enable_device(struct usb_hcd *hcd, struct usb_device *dev);
-static void mausb_endpoint_disable(struct usb_hcd *hcd,
-				   struct usb_host_endpoint *endpoint);
 static void mausb_endpoint_reset(struct usb_hcd *hcd,
 				 struct usb_host_endpoint *endpoint);
 static void mausb_free_dev(struct usb_hcd *hcd, struct usb_device *dev);
@@ -328,23 +263,22 @@ static int mausb_hcd_urb_enqueue(struct usb_hcd *hcd, struct urb *urb,
 				 gfp_t mem_flags);
 static int mausb_hub_update_device(struct usb_hcd *hcd, struct usb_device *dev,
 				   struct usb_tt *tt, gfp_t mem_flags);
-static void mausb_reset_bandwidth(struct usb_hcd *hcd, struct usb_device *dev);
 static int mausb_reset_device(struct usb_hcd *hcd, struct usb_device *dev);
 static int mausb_update_device(struct usb_hcd *hcd, struct usb_device *dev);
 
 static void mausb_print_urb(struct urb *request)
 {
-	mausb_pr_debug("URB: urb=%p, ep_handle=%#x, packet_num=%d, setup_dma=%lld, is_setup_packet=%d, is_ep=%d, is_sg=%d, num_sgs=%d, num_mapped_sgs=%d, status=%d, is_transfer_buffer=%d, transfer_buffer_length=%d, is_transfer_dma=%llu, transfer_flags=%d, is_hcpriv=%d",
-		       request, ((struct mausb_endpoint_ctx *)
-				 request->ep->hcpriv)->ep_handle,
-		       request->number_of_packets, request->setup_dma,
-		       request->setup_packet ? 1 : 0, request->ep ? 1 : 0,
-		       request->sg ? 1 : 0, request->num_sgs,
-		       request->num_mapped_sgs, request->status,
-		       request->transfer_buffer ? 1 : 0,
-		       request->transfer_buffer_length,
-		       request->transfer_dma, request->transfer_flags,
-		       (request->ep && request->ep->hcpriv) ? 1 : 0);
+	dev_vdbg(&request->dev->dev, "URB: urb=%p, ep_handle=%#x, packet_num=%d, setup_dma=%lld, is_setup_packet=%d, is_ep=%d, is_sg=%d, num_sgs=%d, num_mapped_sgs=%d, status=%d, is_transfer_buffer=%d, transfer_buffer_length=%d, is_transfer_dma=%llu, transfer_flags=%d, is_hcpriv=%d",
+		 request, ((struct mausb_endpoint_ctx *)
+			   request->ep->hcpriv)->ep_handle,
+		 request->number_of_packets, request->setup_dma,
+		 request->setup_packet ? 1 : 0, request->ep ? 1 : 0,
+		 request->sg ? 1 : 0, request->num_sgs,
+		 request->num_mapped_sgs, request->status,
+		 request->transfer_buffer ? 1 : 0,
+		 request->transfer_buffer_length,
+		 request->transfer_dma, request->transfer_flags,
+		 (request->ep && request->ep->hcpriv) ? 1 : 0);
 }
 
 static const struct hc_driver mausb_hc_driver = {
@@ -377,10 +311,7 @@ static const struct hc_driver mausb_hc_driver = {
 
 	.add_endpoint	  = mausb_add_endpoint,
 	.drop_endpoint	  = mausb_drop_endpoint,
-	.check_bandwidth  = mausb_check_bandwidth,
-	.reset_bandwidth  = mausb_reset_bandwidth,
 	.address_device   = mausb_address_device,
-	.endpoint_disable = mausb_endpoint_disable,
 	.endpoint_reset	  = mausb_endpoint_reset,
 
 #ifdef ISOCH_CALLBACKS
@@ -523,7 +454,7 @@ static int mausb_hcd_start(struct usb_hcd *hcd)
 
 static void mausb_hcd_stop(struct usb_hcd *hcd)
 {
-	mausb_pr_debug("Not implemented");
+	dev_vdbg(mausb_host_dev.this_device, "Not implemented");
 }
 
 static int mausb_hcd_hub_status(struct usb_hcd *hcd, char *buff)
@@ -544,7 +475,8 @@ static int mausb_hcd_hub_status(struct usb_hcd *hcd, char *buff)
 	spin_lock_irqsave(&mhcd->lock, flags);
 
 	if (!HCD_HW_ACCESSIBLE(hcd)) {
-		mausb_pr_info("hcd not accessible, hcd speed=%d", hcd->speed);
+		dev_info(mausb_host_dev.this_device, "hcd not accessible, hcd speed=%d",
+			 hcd->speed);
 		spin_unlock_irqrestore(&mhcd->lock, flags);
 		return 0;
 	}
@@ -556,11 +488,11 @@ static int mausb_hcd_hub_status(struct usb_hcd *hcd, char *buff)
 		}
 	}
 
-	mausb_pr_info("Usb %d.0 : changed=%d, retval=%d",
-		      (hcd->speed == HCD_USB2) ? 2 : 3, changed, retval);
+	dev_info(mausb_host_dev.this_device, "Usb %d.0 : changed=%d, retval=%d",
+		 (hcd->speed == HCD_USB2) ? 2 : 3, changed, retval);
 
 	if (hcd->state == HC_STATE_SUSPENDED && changed == 1) {
-		mausb_pr_info("hcd state is suspended");
+		dev_info(mausb_host_dev.this_device, "hcd state is suspended");
 		usb_hcd_resume_root_hub(hcd);
 	}
 
@@ -575,7 +507,8 @@ static int mausb_hcd_bus_resume(struct usb_hcd *hcd)
 
 	spin_lock_irqsave(&mhcd->lock, flags);
 	if (!HCD_HW_ACCESSIBLE(hcd)) {
-		mausb_pr_info("hcd not accessible, hcd speed=%d", hcd->speed);
+		dev_info(mausb_host_dev.this_device, "hcd not accessible, hcd speed=%d",
+			 hcd->speed);
 		spin_unlock_irqrestore(&mhcd->lock, flags);
 		return -ESHUTDOWN;
 	}
@@ -610,12 +543,13 @@ static int mausb_hcd_hub_control(struct usb_hcd *hcd, u16 type_req,
 	if (index < 1 || index > NUMBER_OF_PORTS)
 		invalid_rhport = true;
 
-	mausb_pr_info("TypeReq=%d", type_req);
+	dev_vdbg(mausb_host_dev.this_device, "TypeReq=%d", type_req);
 
 	spin_lock_irqsave(&hub_mhcd->lock, flags);
 
 	if (!HCD_HW_ACCESSIBLE(hcd)) {
-		mausb_pr_info("hcd not accessible, hcd speed=%d", hcd->speed);
+		dev_err(mausb_host_dev.this_device, "hcd not accessible, hcd speed=%d",
+			hcd->speed);
 		spin_unlock_irqrestore(&hub_mhcd->lock, flags);
 		return -ETIMEDOUT;
 	}
@@ -671,17 +605,17 @@ invalid_port:
 static int mausb_validate_urb(struct urb *urb)
 {
 	if (!urb) {
-		mausb_pr_err("urb is NULL");
+		dev_err(mausb_host_dev.this_device, "urb is NULL");
 		return -EINVAL;
 	}
 
 	if (!urb->ep->hcpriv) {
-		mausb_pr_err("urb->ep->hcpriv is NULL");
+		dev_err(mausb_host_dev.this_device, "urb->ep->hcpriv is NULL");
 		return -EINVAL;
 	}
 
 	if (!urb->ep->enabled) {
-		mausb_pr_err("Endpoint not enabled");
+		dev_err(mausb_host_dev.this_device, "Endpoint not enabled");
 		return -EINVAL;
 	}
 	return 0;
@@ -696,7 +630,7 @@ static int mausb_hcd_urb_enqueue(struct usb_hcd *hcd, struct urb *urb,
 	int status = 0;
 
 	if (mausb_validate_urb(urb) < 0) {
-		mausb_pr_err("Hpal urb enqueue failed");
+		dev_err(&urb->dev->dev, "Hpal urb enqueue failed");
 		return -EPROTO;
 	}
 
@@ -704,31 +638,25 @@ static int mausb_hcd_urb_enqueue(struct usb_hcd *hcd, struct urb *urb,
 	ma_dev = endpoint_ctx->ma_dev;
 
 	if (atomic_read(&ma_dev->unresponsive_client)) {
-		mausb_pr_err("Client is not responsive anymore - finish urb immediately");
+		dev_err(&urb->dev->dev, "Client is not responsive anymore - finish urb immediately");
 		return -EHOSTDOWN;
 	}
 
 	urb->hcpriv = hcd;
 
-	mausb_pr_debug("ep_handle=%#x, dev_handle=%#x, urb_reject=%d",
-		       endpoint_ctx->ep_handle, endpoint_ctx->dev_handle,
-		       atomic_read(&urb->reject));
+	dev_vdbg(&urb->dev->dev, "ep_handle=%#x, dev_handle=%#x, urb_reject=%d",
+		 endpoint_ctx->ep_handle, endpoint_ctx->dev_handle,
+		 atomic_read(&urb->reject));
 
 	status = mausb_insert_urb_in_tree(urb, true);
 	if (status) {
-		mausb_pr_err("Hpal urb enqueue failed");
+		dev_err(&urb->dev->dev, "Hpal urb enqueue failed");
 		return status;
 	}
 
 	atomic_inc(&urb->use_count);
 
 	mausb_print_urb(urb);
-
-	/*
-	 * Masking URB_SHORT_NOT_OK flag as SCSI driver is adding it where it
-	 * should not, so it is breaking the USB drive on the linux
-	 */
-	urb->transfer_flags &= ~URB_SHORT_NOT_OK;
 
 	status = mausb_data_req_enqueue_event(ma_dev, endpoint_ctx->ep_handle,
 					      urb);
@@ -751,11 +679,12 @@ static int mausb_hcd_urb_dequeue(struct usb_hcd *hcd, struct urb *urb,
 	struct mausb_device	  *ma_dev;
 	struct mausb_urb_ctx	  *urb_ctx;
 
-	mausb_pr_info("Urb=%p", urb);
+	dev_info(&urb->dev->dev, "Urb=%p", urb);
 
 	urb_ctx = mausb_unlink_and_delete_urb_from_tree(urb, status);
 	if (!urb_ctx) {
-		mausb_pr_warn("Urb=%p is not in tree", urb);
+		dev_warn(&urb->dev->dev, "Urb=%p is not in tree",
+			 urb);
 		return 0;
 	}
 
@@ -808,7 +737,7 @@ int mausb_probe(struct device *dev)
 
 	ret = usb_add_hcd(hcd_hs, 0, 0);
 	if (ret) {
-		mausb_pr_err("usb_add_hcd failed");
+		dev_err(dev, "usb_add_hcd failed");
 		goto put_hcd_hs;
 	}
 
@@ -827,7 +756,7 @@ int mausb_probe(struct device *dev)
 
 	ret = usb_add_hcd(hcd_ss, 0, 0);
 	if (ret) {
-		mausb_pr_err("usb_add_hcd failed");
+		dev_err(dev, "usb_add_hcd failed");
 		goto put_hcd_ss;
 	}
 
@@ -884,7 +813,7 @@ static void mausb_set_port_feature(struct usb_hcd *hcd, u16 type_req,
 
 	switch (value) {
 	case USB_PORT_FEAT_LINK_STATE:
-		mausb_pr_debug("USB_PORT_FEAT_LINK_STATE");
+		dev_vdbg(mausb_host_dev.this_device, "USB_PORT_FEAT_LINK_STATE");
 		if (hcd->speed == HCD_USB3) {
 			if ((hub->ma_devs[index - 1].port_status &
 			     USB_SS_PORT_STAT_POWER) != 0) {
@@ -905,7 +834,7 @@ static void mausb_set_port_feature(struct usb_hcd *hcd, u16 type_req,
 	case USB_PORT_FEAT_SUSPEND:
 		break;
 	case USB_PORT_FEAT_POWER:
-		mausb_pr_debug("USB_PORT_FEAT_POWER");
+		dev_vdbg(mausb_host_dev.this_device, "USB_PORT_FEAT_POWER");
 
 		if (hcd->speed == HCD_USB3) {
 			hub->ma_devs[index - 1].port_status |=
@@ -916,10 +845,11 @@ static void mausb_set_port_feature(struct usb_hcd *hcd, u16 type_req,
 		}
 		break;
 	case USB_PORT_FEAT_BH_PORT_RESET:
-		mausb_pr_debug("USB_PORT_FEAT_BH_PORT_RESET");
+		dev_dbg(mausb_host_dev.this_device, "USB_PORT_FEAT_BH_PORT_RESET");
 		/* fall through */
 	case USB_PORT_FEAT_RESET:
-		mausb_pr_debug("USB_PORT_FEAT_RESET hcd->speed=%d", hcd->speed);
+		dev_vdbg(mausb_host_dev.this_device, "USB_PORT_FEAT_RESET hcd->speed=%d",
+			 hcd->speed);
 
 		if (hcd->speed == HCD_USB3) {
 			hub->ma_devs[index - 1].port_status = 0;
@@ -935,7 +865,7 @@ static void mausb_set_port_feature(struct usb_hcd *hcd, u16 type_req,
 		}
 		/* fall through */
 	default:
-		mausb_pr_info("Default value=%d", value);
+		dev_vdbg(mausb_host_dev.this_device, "Default value=%d", value);
 
 		if (hcd->speed == HCD_USB3) {
 			if ((hub->ma_devs[index - 1].port_status &
@@ -964,7 +894,8 @@ static void mausb_get_port_status(struct usb_hcd *hcd, u16 type_req,
 
 	if ((hub->ma_devs[index - 1].port_status &
 				(1 << USB_PORT_FEAT_RESET)) != 0) {
-		mausb_pr_info("Finished reset hcd->speed=%d", hcd->speed);
+		dev_info(mausb_host_dev.this_device, "Finished reset hcd->speed=%d",
+			 hcd->speed);
 
 		dev_speed = hub->ma_devs[index - 1].dev_speed;
 		switch (dev_speed) {
@@ -977,8 +908,8 @@ static void mausb_get_port_status(struct usb_hcd *hcd, u16 type_req,
 			    USB_PORT_STAT_HIGH_SPEED;
 			break;
 		default:
-			mausb_pr_info("Not updating port_status for device speed %d",
-				      dev_speed);
+			dev_info(mausb_host_dev.this_device, "Not updating port_status for device speed %d",
+				 dev_speed);
 		}
 
 		hub->ma_devs[index - 1].port_status |=
@@ -991,7 +922,8 @@ static void mausb_get_port_status(struct usb_hcd *hcd, u16 type_req,
 	((__le16 *)buff)[1] =
 	    cpu_to_le16(hub->ma_devs[index - 1].port_status >> 16);
 
-	mausb_pr_info("port_status=%d", hub->ma_devs[index - 1].port_status);
+	dev_vdbg(mausb_host_dev.this_device, "port_status=%d",
+		 hub->ma_devs[index - 1].port_status);
 }
 
 static void mausb_clear_port_feature(struct usb_hcd *hcd, u16 type_req,
@@ -1006,7 +938,7 @@ static void mausb_clear_port_feature(struct usb_hcd *hcd, u16 type_req,
 	case USB_PORT_FEAT_SUSPEND:
 		break;
 	case USB_PORT_FEAT_POWER:
-		mausb_pr_debug("USB_PORT_FEAT_POWER");
+		dev_vdbg(mausb_host_dev.this_device, "USB_PORT_FEAT_POWER");
 
 		if (hcd->speed == HCD_USB3) {
 			hub->ma_devs[index - 1].port_status &=
@@ -1017,11 +949,10 @@ static void mausb_clear_port_feature(struct usb_hcd *hcd, u16 type_req,
 		}
 		break;
 	case USB_PORT_FEAT_RESET:
-
 	case USB_PORT_FEAT_C_RESET:
-
 	default:
-		mausb_pr_info("Default value: %d", value);
+		dev_vdbg(mausb_host_dev.this_device, "Default value: %d",
+			 value);
 
 		hub->ma_devs[index - 1].port_status &= ~(1 << value);
 	}
@@ -1036,7 +967,7 @@ static void mausb_get_hub_status(struct usb_hcd *hcd, u16 type_req,
 
 static int mausb_alloc_dev(struct usb_hcd *hcd, struct usb_device *dev)
 {
-	mausb_pr_info("Usb device=%p", dev);
+	dev_info(mausb_host_dev.this_device, "Usb device=%p", dev);
 
 	return 1;
 }
@@ -1055,8 +986,8 @@ static void mausb_free_dev(struct usb_hcd *hcd, struct usb_device *dev)
 
 	status = get_root_hub_port_number(dev, &port_number);
 	if (status < 0 || port_number >= NUMBER_OF_PORTS) {
-		mausb_pr_info("port_number out of range, port_number=%x",
-			      port_number);
+		dev_dbg(mausb_host_dev.this_device, "port_number out of range, port_number=%x",
+			port_number);
 		return;
 	}
 
@@ -1067,21 +998,21 @@ static void mausb_free_dev(struct usb_hcd *hcd, struct usb_device *dev)
 	spin_unlock_irqrestore(&mhcd->lock, flags);
 
 	if (!ma_dev) {
-		mausb_pr_err("MAUSB device not found on port_number=%d",
-			     port_number);
+		dev_err(mausb_host_dev.this_device, "MAUSB device not found on port_number=%d",
+			port_number);
 		return;
 	}
 
 	usb_device_ctx = mausb_find_usb_device(mdev, dev);
 	if (!usb_device_ctx) {
-		mausb_pr_warn("device_ctx is not found");
+		dev_warn(mausb_host_dev.this_device, "device_ctx is not found");
 		return;
 	}
 
 	dev_handle = usb_device_ctx->dev_handle;
 
 	if (atomic_read(&ma_dev->unresponsive_client)) {
-		mausb_pr_err("Client is not responsive anymore - free usbdevice immediately");
+		dev_err(mausb_host_dev.this_device, "Client is not responsive anymore - free usbdevice immediately");
 		dev->ep0.hcpriv = NULL;
 		kfree(ep_ctx);
 		goto free_dev;
@@ -1091,38 +1022,40 @@ static void mausb_free_dev(struct usb_hcd *hcd, struct usb_device *dev)
 		status = mausb_epinactivate_event_to_user(ma_dev, dev_handle,
 							  ep_ctx->ep_handle);
 
-		mausb_pr_info("epinactivate request ep_handle=%#x, dev_handle=%#x, status=%d",
-			      ep_ctx->ep_handle, dev_handle, status);
+		dev_info(mausb_host_dev.this_device, "epinactivate request ep_handle=%#x, dev_handle=%#x, status=%d",
+			 ep_ctx->ep_handle, dev_handle, status);
 
 		status = mausb_epdelete_event_to_user(ma_dev, dev_handle,
 						      ep_ctx->ep_handle);
 
 		if (status < 0)
-			mausb_pr_warn("ep_handle_del request failed for ep0: ep_handle=%#x, dev_handle=%#x",
-				      ep_ctx->ep_handle, dev_handle);
+			dev_warn(mausb_host_dev.this_device, "ep_handle_del request failed for ep0: ep_handle=%#x, dev_handle=%#x",
+				 ep_ctx->ep_handle, dev_handle);
 		dev->ep0.hcpriv = NULL;
 		kfree(ep_ctx);
 
 	} else {
-		mausb_pr_warn("ep_ctx is NULL: dev_handle=%#x", dev_handle);
+		dev_warn(mausb_host_dev.this_device, "ep_ctx is NULL: dev_handle=%#x",
+			 dev_handle);
 	}
 
 	if (dev_handle != DEV_HANDLE_NOT_ASSIGNED) {
 		status = mausb_usbdevdisconnect_event_to_user(ma_dev,
 							      dev_handle);
 		if (status < 0)
-			mausb_pr_warn("usb_dev_disconnect req failed for dev_handle=%#x",
-				      dev_handle);
+			dev_warn(mausb_host_dev.this_device, "usb_dev_disconnect req failed for dev_handle=%#x",
+				 dev_handle);
 	}
 
 free_dev:
 	if (atomic_sub_and_test(1, &ma_dev->num_of_usb_devices)) {
-		mausb_pr_info("All usb devices destroyed - proceed with disconnecting");
+		dev_info(mausb_host_dev.this_device, "All usb devices destroyed - proceed with disconnecting");
 		queue_work(ma_dev->workq, &ma_dev->socket_disconnect_work);
 	}
 
 	rb_erase(&usb_device_ctx->rb_node, &mdev->usb_devices);
-	mausb_pr_info("USB device deleted device=%p", usb_device_ctx->dev_addr);
+	dev_info(mausb_host_dev.this_device, "USB device deleted device=%p",
+		 usb_device_ctx->dev_addr);
 	kfree(usb_device_ctx);
 
 	if (kref_put(&ma_dev->refcount, mausb_release_ma_dev_async))
@@ -1137,8 +1070,9 @@ static int mausb_device_assign_address(struct mausb_device *dev,
 						     usb_dev_ctx->dev_handle,
 						     RESPONSE_TIMEOUT);
 
-	mausb_pr_info("dev_handle=%#x, status=%d", usb_dev_ctx->dev_handle,
-		      status);
+	dev_info(mausb_host_dev.this_device, "dev_handle=%#x, status=%d",
+		 usb_dev_ctx->dev_handle, status);
+
 	usb_dev_ctx->addressed = (status == 0);
 
 	return status;
@@ -1163,15 +1097,15 @@ mausb_alloc_device_ctx(struct hub_ctx *hub, struct usb_device *dev,
 
 	if (mausb_insert_usb_device(&hub->ma_devs[port_number],
 				    usb_device_ctx)) {
-		mausb_pr_warn("device_ctx already exists");
+		dev_warn(&dev->dev, "device_ctx already exists");
 		kfree(usb_device_ctx);
 		*status = -EEXIST;
 		return NULL;
 	}
 
 	kref_get(&ma_dev->refcount);
-	mausb_pr_info("New USB device added device=%p",
-		      usb_device_ctx->dev_addr);
+	dev_info(&dev->dev, "New USB device added device=%p",
+		 usb_device_ctx->dev_addr);
 	atomic_inc(&ma_dev->num_of_usb_devices);
 
 	return usb_device_ctx;
@@ -1189,8 +1123,8 @@ static int mausb_address_device(struct usb_hcd *hcd, struct usb_device *dev)
 
 	status = get_root_hub_port_number(dev, &port_number);
 	if (status < 0 || port_number >= NUMBER_OF_PORTS) {
-		mausb_pr_warn("port_number out of range, port_number=%x",
-			      port_number);
+		dev_warn(&dev->dev, "port_number out of range, port_number=%x",
+			 port_number);
 		return -EINVAL;
 	}
 
@@ -1199,8 +1133,8 @@ static int mausb_address_device(struct usb_hcd *hcd, struct usb_device *dev)
 	spin_unlock_irqrestore(&mhcd->lock, flags);
 
 	if (!ma_dev) {
-		mausb_pr_warn("MAUSB device not found on port_number=%d",
-			      port_number);
+		dev_warn(&dev->dev, "MAUSB device not found on port_number=%d",
+			 port_number);
 		return -ENODEV;
 	}
 
@@ -1212,13 +1146,13 @@ static int mausb_address_device(struct usb_hcd *hcd, struct usb_device *dev)
 			return status;
 	}
 
-	mausb_pr_info("dev_handle=%#x, dev_speed=%#x",
-		      usb_device_ctx->dev_handle, dev->speed);
+	dev_info(&dev->dev, "dev_handle=%#x, dev_speed=%#x",
+		 usb_device_ctx->dev_handle, dev->speed);
 
 	if (dev->speed >= USB_SPEED_SUPER)
-		mausb_pr_info("USB 3.0");
+		dev_info(&dev->dev, "USB 3.0");
 	else
-		mausb_pr_info("USB 2.0");
+		dev_info(&dev->dev, "USB 2.0");
 
 	if (usb_device_ctx->dev_handle == DEV_HANDLE_NOT_ASSIGNED) {
 		status = mausb_enable_device(hcd, dev);
@@ -1234,8 +1168,8 @@ static int mausb_address_device(struct usb_hcd *hcd, struct usb_device *dev)
 
 	endpoint_ctx = dev->ep0.hcpriv;
 	if (!endpoint_ctx) {
-		mausb_pr_err("endpoint_ctx is NULL: dev_handle=%#x",
-			     usb_device_ctx->dev_handle);
+		dev_err(&dev->dev, "endpoint_ctx is NULL: dev_handle=%#x",
+			usb_device_ctx->dev_handle);
 		return -EINVAL;
 	}
 
@@ -1251,9 +1185,8 @@ static int mausb_address_device(struct usb_hcd *hcd, struct usb_device *dev)
 					       &endpoint_ctx->ep_handle,
 					       dev->ep0.desc.wMaxPacketSize);
 
-	mausb_pr_info("modify ep0 response, ep_handle=%#x, dev_handle=%#x, status=%d",
-		      endpoint_ctx->ep_handle, endpoint_ctx->dev_handle,
-		      status);
+	dev_info(&dev->dev, "modify ep0 response, ep_handle=%#x, dev_handle=%#x, status=%d",
+		 endpoint_ctx->ep_handle, endpoint_ctx->dev_handle, status);
 
 	return status;
 }
@@ -1273,8 +1206,8 @@ static int mausb_add_endpoint(struct usb_hcd *hcd, struct usb_device *dev,
 
 	status = get_root_hub_port_number(dev, &port_number);
 	if (status < 0 || port_number >= NUMBER_OF_PORTS) {
-		mausb_pr_info("port_number out of range, port_number=%x",
-			      port_number);
+		dev_dbg(&dev->dev, "port_number out of range, port_number=%x",
+			port_number);
 		return 0;
 	}
 
@@ -1283,15 +1216,14 @@ static int mausb_add_endpoint(struct usb_hcd *hcd, struct usb_device *dev,
 	spin_unlock_irqrestore(&mhcd->lock, flags);
 
 	if (!ma_dev) {
-		mausb_pr_err("MAUSB device not found on port_number=%d",
-			     port_number);
+		dev_err(&dev->dev, "MAUSB device not found on port_number=%d",
+			port_number);
 		return -ENODEV;
 	}
 
 	usb_dev_ctx = mausb_find_usb_device(&hub->ma_devs[port_number], dev);
-
 	if (!usb_dev_ctx) {
-		mausb_pr_warn("Device not found");
+		dev_warn(&dev->dev, "Device not found");
 		return -ENODEV;
 	}
 
@@ -1324,15 +1256,15 @@ static int mausb_add_endpoint(struct usb_hcd *hcd, struct usb_device *dev,
 	}
 
 	if (status < 0) {
-		mausb_pr_err("ep_handle_request failed dev_handle=%#x",
-			     usb_dev_ctx->dev_handle);
+		dev_err(&dev->dev, "ep_handle_request failed dev_handle=%#x",
+			usb_dev_ctx->dev_handle);
 		endpoint->hcpriv = NULL;
 		kfree(endpoint_ctx);
 		return status;
 	}
 
-	mausb_pr_info("Endpoint added ep_handle=%#x, dev_handle=%#x",
-		      endpoint_ctx->ep_handle, endpoint_ctx->dev_handle);
+	dev_info(&dev->dev, "Endpoint added ep_handle=%#x, dev_handle=%#x",
+		 endpoint_ctx->ep_handle, endpoint_ctx->dev_handle);
 
 	return 0;
 }
@@ -1351,8 +1283,8 @@ static int mausb_drop_endpoint(struct usb_hcd *hcd, struct usb_device *dev,
 
 	status = get_root_hub_port_number(dev, &port_number);
 	if (status < 0 || port_number >= NUMBER_OF_PORTS) {
-		mausb_pr_info("port_number out of range, port_number=%x",
-			      port_number);
+		dev_dbg(&dev->dev, "port_number out of range, port_number=%x",
+			port_number);
 		return -EINVAL;
 	}
 
@@ -1361,27 +1293,27 @@ static int mausb_drop_endpoint(struct usb_hcd *hcd, struct usb_device *dev,
 	spin_unlock_irqrestore(&mhcd->lock, flags);
 
 	if (!ma_dev) {
-		mausb_pr_err("MAUSB device not found on port_number=%d",
-			     port_number);
+		dev_err(&dev->dev, "MAUSB device not found on port_number=%d",
+			port_number);
 		return -ENODEV;
 	}
 
 	usb_dev_ctx = mausb_find_usb_device(&hub->ma_devs[port_number], dev);
 
 	if (!endpoint_ctx) {
-		mausb_pr_err("Endpoint context doesn't exist");
+		dev_err(&dev->dev, "Endpoint context doesn't exist");
 		return 0;
 	}
 	if (!usb_dev_ctx) {
-		mausb_pr_err("Usb device context doesn't exist");
+		dev_err(&dev->dev, "Usb device context doesn't exist");
 		return -ENODEV;
 	}
 
-	mausb_pr_info("Start dropping ep_handle=%#x, dev_handle=%#x",
-		      endpoint_ctx->ep_handle, endpoint_ctx->dev_handle);
+	dev_info(&dev->dev, "Start dropping ep_handle=%#x, dev_handle=%#x",
+		 endpoint_ctx->ep_handle, endpoint_ctx->dev_handle);
 
 	if (atomic_read(&ma_dev->unresponsive_client)) {
-		mausb_pr_err("Client is not responsive anymore - drop endpoint immediately");
+		dev_err(&dev->dev, "Client is not responsive anymore - drop endpoint immediately");
 		endpoint->hcpriv = NULL;
 		kfree(endpoint_ctx);
 		return -ESHUTDOWN;
@@ -1391,18 +1323,17 @@ static int mausb_drop_endpoint(struct usb_hcd *hcd, struct usb_device *dev,
 						  usb_dev_ctx->dev_handle,
 						  endpoint_ctx->ep_handle);
 
-	mausb_pr_info("epinactivate request ep_handle=%#x, dev_handle=%#x, status=%d",
-		      endpoint_ctx->ep_handle, endpoint_ctx->dev_handle,
-		      status);
+	dev_info(&dev->dev, "epinactivate request ep_handle=%#x, dev_handle=%#x, status=%d",
+		 endpoint_ctx->ep_handle, endpoint_ctx->dev_handle, status);
 
 	while (true) {
 		status = mausb_epdelete_event_to_user(ma_dev,
 						      usb_dev_ctx->dev_handle,
 						      endpoint_ctx->ep_handle);
 
-		mausb_pr_info("ep_handle_delete_request, ep_handle=%#x, dev_handle=%#x, status=%d",
-			      endpoint_ctx->ep_handle, endpoint_ctx->dev_handle,
-			      status);
+		dev_info(&dev->dev, "ep_handle_delete_request, ep_handle=%#x, dev_handle=%#x, status=%d",
+			 endpoint_ctx->ep_handle, endpoint_ctx->dev_handle,
+			 status);
 
 		if (status == -EBUSY) {
 			if (++retries < MAUSB_BUSY_RETRIES_COUNT)
@@ -1414,8 +1345,8 @@ static int mausb_drop_endpoint(struct usb_hcd *hcd, struct usb_device *dev,
 		}
 	}
 
-	mausb_pr_info("Endpoint dropped ep_handle=%#x, dev_handle=%#x",
-		      endpoint_ctx->ep_handle, endpoint_ctx->dev_handle);
+	dev_info(&dev->dev, "Endpoint dropped ep_handle=%#x, dev_handle=%#x",
+		 endpoint_ctx->ep_handle, endpoint_ctx->dev_handle);
 
 	endpoint->hcpriv = NULL;
 	kfree(endpoint_ctx);
@@ -1442,8 +1373,8 @@ static int mausb_device_assign_dev_handle(struct usb_hcd *hcd,
 
 	status = get_root_hub_port_number(dev, &port_number);
 	if (status < 0 || port_number >= NUMBER_OF_PORTS) {
-		mausb_pr_info("port_number out of range, port_number=%x",
-			      port_number);
+		dev_dbg(mausb_host_dev.this_device, "port_number out of range, port_number=%x",
+			port_number);
 		return -EINVAL;
 	}
 
@@ -1464,11 +1395,11 @@ static int mausb_device_assign_dev_handle(struct usb_hcd *hcd,
 	}
 
 	dev_speed = usb_to_mausb_device_speed(dev->speed);
-	mausb_pr_info("start... mausb_devspeed=%d, route=%#x, port_number=%d",
-		      dev_speed, dev->route, port_number);
+	dev_info(mausb_host_dev.this_device, "start... mausb_devspeed=%d, route=%#x, port_number=%d",
+		 dev_speed, dev->route, port_number);
 
 	if (dev_speed == -EINVAL) {
-		mausb_pr_err("bad dev_speed");
+		dev_err(mausb_host_dev.this_device, "bad dev_speed");
 		return -EINVAL;
 	}
 
@@ -1479,12 +1410,14 @@ static int mausb_device_assign_dev_handle(struct usb_hcd *hcd,
 						  ma_dev->lse,
 						  &usb_device_ctx->dev_handle);
 
-	mausb_pr_info("mausb_usbdevhandle_event status=%d", status);
+	dev_dbg(mausb_host_dev.this_device, "mausb_usbdevhandle_event status=%d",
+		status);
 
 	if (status < 0)
 		return status;
 
-	mausb_pr_info("Get ref dev_handle=%#x", usb_device_ctx->dev_handle);
+	dev_vdbg(mausb_host_dev.this_device, "dev_handle=%#x",
+		 usb_device_ctx->dev_handle);
 
 	endpoint_ctx = kzalloc(sizeof(*endpoint_ctx), GFP_ATOMIC);
 	if (!endpoint_ctx)
@@ -1503,9 +1436,8 @@ static int mausb_device_assign_dev_handle(struct usb_hcd *hcd,
 					      &descriptor,
 					      &endpoint_ctx->ep_handle);
 
-	mausb_pr_info("mausb_ephandle_event ep_handle=%#x, dev_handle=%#x, status=%d",
-		      endpoint_ctx->ep_handle, endpoint_ctx->dev_handle,
-		      status);
+	dev_info(mausb_host_dev.this_device, "mausb_ephandle_event ep_handle=%#x, dev_handle=%#x, status=%d",
+		 endpoint_ctx->ep_handle, endpoint_ctx->dev_handle, status);
 
 	if (status < 0) {
 		dev->ep0.hcpriv = NULL;
@@ -1527,8 +1459,8 @@ static int mausb_enable_device(struct usb_hcd *hcd, struct usb_device *dev)
 
 	status = get_root_hub_port_number(dev, &port_number);
 	if (status < 0 || port_number >= NUMBER_OF_PORTS) {
-		mausb_pr_info("port_number out of range, port_number=%x",
-			      port_number);
+		dev_dbg(mausb_host_dev.this_device, "port_number out of range, port_number=%x",
+			port_number);
 		return -EINVAL;
 	}
 
@@ -1537,8 +1469,8 @@ static int mausb_enable_device(struct usb_hcd *hcd, struct usb_device *dev)
 	spin_unlock_irqrestore(&mhcd->lock, flags);
 
 	if (!ma_dev) {
-		mausb_pr_err("MAUSB device not found on port_number=%d",
-			     port_number);
+		dev_err(mausb_host_dev.this_device, "MAUSB device not found on port_number=%d",
+			port_number);
 		return -ENODEV;
 	}
 
@@ -1550,8 +1482,8 @@ static int mausb_enable_device(struct usb_hcd *hcd, struct usb_device *dev)
 			return status;
 	}
 
-	mausb_pr_info("Device assigned and addressed usb_device_ctx=%p",
-		      usb_device_ctx);
+	dev_info(mausb_host_dev.this_device, "Device assigned and addressed usb_device_ctx=%p",
+		 usb_device_ctx);
 
 	if (usb_device_ctx->dev_handle == DEV_HANDLE_NOT_ASSIGNED)
 		return mausb_device_assign_dev_handle(hcd, dev, hub, ma_dev,
@@ -1560,8 +1492,8 @@ static int mausb_enable_device(struct usb_hcd *hcd, struct usb_device *dev)
 	if (!usb_device_ctx->addressed)
 		return mausb_device_assign_address(ma_dev, usb_device_ctx);
 
-	mausb_pr_info("Device assigned and addressed dev_handle=%#x",
-		      usb_device_ctx->dev_handle);
+	dev_info(mausb_host_dev.this_device, "Device assigned and addressed dev_handle=%#x",
+		 usb_device_ctx->dev_handle);
 	return 0;
 }
 
@@ -1580,14 +1512,14 @@ static int mausb_update_device(struct usb_hcd *hcd, struct usb_device *dev)
 	unsigned long flags = 0;
 
 	if (mausb_is_hub_device(dev)) {
-		mausb_pr_warn("Device is hub");
+		dev_warn(mausb_host_dev.this_device, "Device is hub");
 		return 0;
 	}
 
 	status = get_root_hub_port_number(dev, &port_number);
 	if (status < 0 || port_number >= NUMBER_OF_PORTS) {
-		mausb_pr_info("port_number out of range, port_number=%x",
-			      port_number);
+		dev_dbg(mausb_host_dev.this_device, "port_number out of range, port_number=%x",
+			port_number);
 		return -EINVAL;
 	}
 
@@ -1596,14 +1528,14 @@ static int mausb_update_device(struct usb_hcd *hcd, struct usb_device *dev)
 	spin_unlock_irqrestore(&mhcd->lock, flags);
 
 	if (!ma_dev) {
-		mausb_pr_err("MAUSB device not found on port_number=%d",
-			     port_number);
+		dev_err(mausb_host_dev.this_device, "MAUSB device not found on port_number=%d",
+			port_number);
 		return -ENODEV;
 	}
 
 	usb_device_ctx = mausb_find_usb_device(&hub->ma_devs[port_number], dev);
 	if (!usb_device_ctx) {
-		mausb_pr_warn("Device not found");
+		dev_warn(mausb_host_dev.this_device, "Device not found");
 		return -ENODEV;
 	}
 
@@ -1612,8 +1544,8 @@ static int mausb_update_device(struct usb_hcd *hcd, struct usb_device *dev)
 					       0, 0, 0, 0, 0, 0,
 					       &dev->descriptor);
 
-	mausb_pr_info("Finished dev_handle=%#x, status=%d",
-		      usb_device_ctx->dev_handle, status);
+	dev_info(mausb_host_dev.this_device, "Finished dev_handle=%#x, status=%d",
+		 usb_device_ctx->dev_handle, status);
 
 	return status;
 }
@@ -1640,8 +1572,8 @@ static int mausb_hub_update_device(struct usb_hcd *hcd, struct usb_device *dev,
 
 	status = get_root_hub_port_number(dev, &port_number);
 	if (status < 0 || port_number >= NUMBER_OF_PORTS) {
-		mausb_pr_info("port_number out of range, port_number=%x",
-			      port_number);
+		dev_dbg(mausb_host_dev.this_device, "port_number out of range, port_number=%x",
+			port_number);
 		return 0;
 	}
 
@@ -1650,16 +1582,15 @@ static int mausb_hub_update_device(struct usb_hcd *hcd, struct usb_device *dev,
 	spin_unlock_irqrestore(&mhcd->lock, flags);
 
 	if (!ma_dev) {
-		mausb_pr_err("MAUSB device not found on port_number=%d",
-			     port_number);
+		dev_err(mausb_host_dev.this_device, "MAUSB device not found on port_number=%d",
+			port_number);
 		return -ENODEV;
 	}
 
 	usb_device_ctx = mausb_find_usb_device(&hub->ma_devs[port_number],
 					       dev);
-
 	if (!usb_device_ctx) {
-		mausb_pr_err("USB device not found");
+		dev_err(mausb_host_dev.this_device, "USB device not found");
 		return -ENODEV;
 	}
 
@@ -1677,27 +1608,10 @@ static int mausb_hub_update_device(struct usb_hcd *hcd, struct usb_device *dev,
 					       integrated_hub_latency,
 					       &dev->descriptor);
 
-	mausb_pr_info("Finished dev_handle=%#x, status=%d",
-		      usb_device_ctx->dev_handle, status);
+	dev_info(mausb_host_dev.this_device, "Finished dev_handle=%#x, status=%d",
+		 usb_device_ctx->dev_handle, status);
 
 	return status;
-}
-
-static int mausb_check_bandwidth(struct usb_hcd *hcd, struct usb_device *dev)
-{
-	mausb_pr_debug("Not implemented");
-	return 0;
-}
-
-static void mausb_reset_bandwidth(struct usb_hcd *hcd, struct usb_device *dev)
-{
-	mausb_pr_debug("Not implemented");
-}
-
-static void mausb_endpoint_disable(struct usb_hcd *hcd,
-				   struct usb_host_endpoint *endpoint)
-{
-	mausb_pr_debug("Not implemented");
 }
 
 static void mausb_endpoint_reset(struct usb_hcd *hcd,
@@ -1720,10 +1634,8 @@ static void mausb_endpoint_reset(struct usb_hcd *hcd,
 	struct ma_usb_ephandlereq_desc_std descriptor;
 
 	ep_ctx = endpoint->hcpriv;
-	if (!ep_ctx) {
-		mausb_pr_err("ep->hcpriv is NULL");
+	if (!ep_ctx)
 		return;
-	}
 
 	usb_device_ctx	= ep_ctx->usb_device_ctx;
 	dev_handle	= usb_device_ctx->dev_handle;
@@ -1731,8 +1643,8 @@ static void mausb_endpoint_reset(struct usb_hcd *hcd,
 
 	status = get_root_hub_port_number(dev, &port_number);
 	if (status < 0 || port_number >= NUMBER_OF_PORTS) {
-		mausb_pr_info("port_number out of range, port_number=%x",
-			      port_number);
+		dev_dbg(&dev->dev, "port_number out of range, port_number=%x",
+			port_number);
 		return;
 	}
 	hub = (struct hub_ctx *)hcd->hcd_priv;
@@ -1742,8 +1654,8 @@ static void mausb_endpoint_reset(struct usb_hcd *hcd,
 	spin_unlock_irqrestore(&mhcd->lock, flags);
 
 	if (!ma_dev) {
-		mausb_pr_err("MAUSB device not found on port_number=%d",
-			     port_number);
+		dev_err(&dev->dev, "MAUSB device not found on port_number=%d",
+			port_number);
 		return;
 	}
 
@@ -1755,8 +1667,8 @@ static void mausb_endpoint_reset(struct usb_hcd *hcd,
 	status = mausb_epreset_event_to_user(ma_dev, dev_handle,
 					     ep_ctx->ep_handle, tsp);
 
-	mausb_pr_info("ep_reset status=%d, ep_handle=%#x, dev_handle=%#x",
-		      status, ep_ctx->ep_handle, dev_handle);
+	dev_info(&dev->dev, "ep_reset status=%d, ep_handle=%#x, dev_handle=%#x",
+		 status, ep_ctx->ep_handle, dev_handle);
 
 	if (status < 0)
 		return;
@@ -1771,8 +1683,8 @@ static void mausb_endpoint_reset(struct usb_hcd *hcd,
 		status = mausb_epactivate_event_to_user(ma_dev, dev_handle,
 							ep_ctx->ep_handle);
 
-		mausb_pr_err("ep_activate failed, status=%d, ep_handle=%#x, dev_handle=%#x",
-			     status, ep_ctx->ep_handle, dev_handle);
+		dev_err(&dev->dev, "ep_activate failed, status=%d, ep_handle=%#x, dev_handle=%#x",
+			status, ep_ctx->ep_handle, dev_handle);
 
 		return;
 	}
@@ -1783,8 +1695,8 @@ static void mausb_endpoint_reset(struct usb_hcd *hcd,
 	status = mausb_epinactivate_event_to_user(ma_dev, dev_handle,
 						  ep_ctx->ep_handle);
 
-	mausb_pr_info("ep_inactivate status=%d, ep_handle=%#x, dev_handle=%#x",
-		      status, ep_ctx->ep_handle, dev_handle);
+	dev_info(&dev->dev, "ep_inactivate status=%d, ep_handle=%#x, dev_handle=%#x",
+		 status, ep_ctx->ep_handle, dev_handle);
 
 	if (status < 0)
 		return;
@@ -1792,8 +1704,8 @@ static void mausb_endpoint_reset(struct usb_hcd *hcd,
 	status = mausb_epdelete_event_to_user(ma_dev, dev_handle,
 					      ep_ctx->ep_handle);
 
-	mausb_pr_info("ep_handle_delete status=%d, ep_handle=%#x, dev_handle=%#x",
-		      status, ep_ctx->ep_handle, dev_handle);
+	dev_info(&dev->dev, "ep_handle_delete status=%d, ep_handle=%#x, dev_handle=%#x",
+		 status, ep_ctx->ep_handle, dev_handle);
 
 	if (status < 0)
 		return;
@@ -1814,8 +1726,8 @@ static void mausb_endpoint_reset(struct usb_hcd *hcd,
 						      &ep_ctx->ep_handle);
 	}
 
-	mausb_pr_info("ep_handle request status=%d, ep_handle=%#x, dev_handle=%#x",
-		      status, ep_ctx->ep_handle, dev_handle);
+	dev_info(&dev->dev, "ep_handle request status=%d, ep_handle=%#x, dev_handle=%#x",
+		 status, ep_ctx->ep_handle, dev_handle);
 }
 
 static int mausb_reset_device(struct usb_hcd *hcd, struct usb_device *dev)
@@ -1832,8 +1744,8 @@ static int mausb_reset_device(struct usb_hcd *hcd, struct usb_device *dev)
 
 	status = get_root_hub_port_number(dev, &port_number);
 	if (status < 0 || port_number >= NUMBER_OF_PORTS) {
-		mausb_pr_info("port_number out of range, port_number=%x",
-			      port_number);
+		dev_dbg(mausb_host_dev.this_device, "port_number out of range, port_number=%x",
+			port_number);
 		return -EINVAL;
 	}
 
@@ -1842,8 +1754,8 @@ static int mausb_reset_device(struct usb_hcd *hcd, struct usb_device *dev)
 	spin_unlock_irqrestore(&mhcd->lock, flags);
 
 	if (!ma_dev) {
-		mausb_pr_err("MAUSB device not found on port_number=%d",
-			     port_number);
+		dev_err(mausb_host_dev.this_device, "MAUSB device not found on port_number=%d",
+			port_number);
 		return -ENODEV;
 	}
 
@@ -1857,8 +1769,8 @@ static int mausb_reset_device(struct usb_hcd *hcd, struct usb_device *dev)
 
 	status = mausb_usbdevreset_event_to_user(ma_dev, dev_handle);
 
-	mausb_pr_info("usb_dev_reset dev_handle=%#x, status=%d",
-		      dev_handle, status);
+	dev_info(mausb_host_dev.this_device, "usb_dev_reset dev_handle=%#x, status=%d",
+		 dev_handle, status);
 
 	if (status == 0)
 		usb_device_ctx->addressed = false;
@@ -1869,13 +1781,11 @@ static int mausb_reset_device(struct usb_hcd *hcd, struct usb_device *dev)
 #ifdef ISOCH_CALLBACKS
 int mausb_sec_event_ring_setup(struct usb_hcd *hcd, unsigned int intr_num)
 {
-	mausb_pr_debug("");
 	return 0;
 }
 
 int mausb_sec_event_ring_cleanup(struct usb_hcd *hcd, unsigned int intr_num)
 {
-	mausb_pr_debug("");
 	return 0;
 }
 
@@ -1883,7 +1793,6 @@ phys_addr_t mausb_get_sec_event_ring_phys_addr(struct usb_hcd *hcd,
 					       unsigned int intr_num,
 					       dma_addr_t *dma)
 {
-	mausb_pr_debug("");
 	return 0;
 }
 
@@ -1892,13 +1801,11 @@ phys_addr_t mausb_get_xfer_ring_phys_addr(struct usb_hcd *hcd,
 					  struct usb_host_endpoint *ep,
 					  dma_addr_t *dma)
 {
-	mausb_pr_debug("");
 	return 0;
 }
 
 int mausb_get_core_id(struct usb_hcd *hcd)
 {
-	mausb_pr_debug("");
 	return 0;
 }
 #endif /* ISOCH_CALLBACKS */
@@ -1908,8 +1815,8 @@ void mausb_clear_hcd_madev(u16 port_number)
 	unsigned long flags = 0;
 
 	if (port_number >= NUMBER_OF_PORTS) {
-		mausb_pr_err("port_number out of range, port_number=%x",
-			     port_number);
+		dev_err(mausb_host_dev.this_device, "port_number out of range, port_number=%x",
+			port_number);
 		return;
 	}
 

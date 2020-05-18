@@ -56,14 +56,15 @@ void mausb_receive_in_data(struct mausb_event *event,
 	data_written = mausb_data_iterator_write(iterator, buffer,
 						 payload_size);
 
-	mausb_pr_debug("data_written=%d, payload_size=%d", data_written,
+	dev_vdbg(mausb_host_dev.this_device, "data_written=%d, payload_size=%d",
+		 data_written,
 		       payload_size);
 	event->data.rem_transfer_size -= data_written;
 
 	if (event->data.transfer_eot) {
-		mausb_pr_debug("transfer_size=%d, rem_transfer_size=%d, status=%d",
-			       event->data.transfer_size,
-			       event->data.rem_transfer_size, event->status);
+		dev_vdbg(mausb_host_dev.this_device, "transfer_size=%d, rem_transfer_size=%d, status=%d",
+			 event->data.transfer_size,
+			 event->data.rem_transfer_size, event->status);
 		mausb_complete_request(urb, event->data.transfer_size -
 				       event->data.rem_transfer_size,
 				       event->status);
@@ -175,7 +176,7 @@ int mausb_send_out_data_msg(struct mausb_device *dev, struct mausb_event *event,
 					       &urb_ctx->iterator);
 
 	if (status < 0) {
-		mausb_pr_err("Failed to prepare transfer packet");
+		dev_err(mausb_host_dev.this_device, "Failed to prepare transfer packet");
 		return status;
 	}
 
@@ -192,9 +193,9 @@ void mausb_receive_out_data(struct mausb_event *event,
 {
 	struct urb *urb = urb_ctx->urb;
 
-	mausb_pr_debug("transfer_size=%d, rem_transfer_size=%d, status=%d",
-		       event->data.transfer_size, event->data.rem_transfer_size,
-		       event->status);
+	dev_vdbg(mausb_host_dev.this_device, "transfer_size=%d, rem_transfer_size=%d, status=%d",
+		 event->data.transfer_size, event->data.rem_transfer_size,
+		 event->status);
 
 	if (event->data.transfer_eot) {
 		mausb_complete_request(urb, urb->transfer_buffer_length -
@@ -290,8 +291,8 @@ static void __mausb_process_in_isoch_short_resp(struct mausb_event *event,
 	int i;
 
 	if (isoch_data >= end_of_packet) {
-		mausb_pr_err("Bad header data. Data start pointer after end of packet: ep_handle=%#x",
-			     event->data.ep_handle);
+		dev_err(mausb_host_dev.this_device, "Bad header data. Data start pointer after end of packet: ep_handle=%#x",
+			event->data.ep_handle);
 		return;
 	}
 
@@ -300,21 +301,21 @@ static void __mausb_process_in_isoch_short_resp(struct mausb_event *event,
 		u16 seg_size = data_block_hdr[i].block_length;
 
 		if (seg_num >= urb->number_of_packets) {
-			mausb_pr_err("Too many segments: ep_handle=%#x, seg_num=%d, urb.number_of_packets=%d",
-				     event->data.ep_handle, seg_num,
-				     urb->number_of_packets);
+			dev_err(mausb_host_dev.this_device, "Too many segments: ep_handle=%#x, seg_num=%d, urb.number_of_packets=%d",
+				event->data.ep_handle, seg_num,
+				urb->number_of_packets);
 			break;
 		}
 
 		if (seg_size > urb->iso_frame_desc[seg_num].length) {
-			mausb_pr_err("Block to long for segment: ep_handle=%#x",
-				     event->data.ep_handle);
+			dev_err(mausb_host_dev.this_device, "Block to long for segment: ep_handle=%#x",
+				event->data.ep_handle);
 			break;
 		}
 
 		if (shift_ptr(isoch_data, seg_size) > end_of_packet) {
-			mausb_pr_err("End of segment after enf of packet: ep_handle=%#x",
-				     event->data.ep_handle);
+			dev_err(mausb_host_dev.this_device, "End of segment after enf of packet: ep_handle=%#x",
+				event->data.ep_handle);
 			break;
 		}
 
@@ -349,8 +350,8 @@ static void __mausb_process_in_isoch_std_resp(struct mausb_event *event,
 	int i;
 
 	if (isoch_data >= end_of_packet) {
-		mausb_pr_err("Bad header data. Data start pointer after end of packet: ep_handle=%#x",
-			     event->data.ep_handle);
+		dev_err(mausb_host_dev.this_device, "Bad header data. Data start pointer after end of packet: ep_handle=%#x",
+			event->data.ep_handle);
 		return;
 	}
 
@@ -360,23 +361,23 @@ static void __mausb_process_in_isoch_std_resp(struct mausb_event *event,
 		u16 block_len = data_block_hdr[i].block_length;
 
 		if (seg_num >= urb->number_of_packets) {
-			mausb_pr_err("Too many segments: ep_handle=%#x, seg_num=%d, number_of_packets=%d",
-				     event->data.ep_handle, seg_num,
-				     urb->number_of_packets);
+			dev_err(mausb_host_dev.this_device, "Too many segments: ep_handle=%#x, seg_num=%d, number_of_packets=%d",
+				event->data.ep_handle, seg_num,
+				urb->number_of_packets);
 			break;
 		}
 
 		if (block_len > urb->iso_frame_desc[seg_num].length -
 			     urb->iso_frame_desc[seg_num].actual_length) {
-			mausb_pr_err("Block too long for segment: ep_handle=%#x",
-				     event->data.ep_handle);
+			dev_err(mausb_host_dev.this_device, "Block too long for segment: ep_handle=%#x",
+				event->data.ep_handle);
 			break;
 		}
 
 		if (shift_ptr(isoch_data, block_len) >
 				       end_of_packet) {
-			mausb_pr_err("End of fragment after end of packet: ep_handle=%#x",
-				     event->data.ep_handle);
+			dev_err(mausb_host_dev.this_device, "End of fragment after end of packet: ep_handle=%#x",
+				event->data.ep_handle);
 			break;
 		}
 
@@ -414,12 +415,12 @@ void mausb_receive_isoch_in_data(struct mausb_device *dev,
 	} else if ((common_hdr->data.i_flags & MA_USB_DATA_IFLAGS_FMT_MASK) &
 		MA_USB_DATA_IFLAGS_HDR_FMT_LONG) {
 		/* Long ISO headers response */
-		mausb_pr_warn("Long isoc headers in response: ep_handle=%#x, req_id=%#x",
-			      event->data.ep_handle, transfer_hdr->req_id);
+		dev_warn(mausb_host_dev.this_device, "Long isoc headers in response: ep_handle=%#x, req_id=%#x",
+			 event->data.ep_handle, transfer_hdr->req_id);
 	} else {
 		/* Error */
-		mausb_pr_err("Isoc header error in response: ep_handle=%#x, req_id=%#x",
-			     event->data.ep_handle, transfer_hdr->req_id);
+		dev_err(mausb_host_dev.this_device, "Isoc header error in response: ep_handle=%#x, req_id=%#x",
+			event->data.ep_handle, transfer_hdr->req_id);
 	}
 }
 
@@ -557,7 +558,7 @@ int mausb_prepare_isoch_out_transfer_packet(struct ma_usb_hdr_common *hdr,
 	if (mausb_data_iterator_read(&urb_ctx->iterator, payload_data_size,
 				     &payload_data_chunks,
 				     &num_of_payload_data_chunks) < 0) {
-		mausb_pr_err("Data iterator read failed");
+		dev_err(mausb_host_dev.this_device, "Data iterator read failed");
 		status = -ENOMEM;
 		goto cleanup_data_chunks;
 	}
@@ -568,7 +569,7 @@ int mausb_prepare_isoch_out_transfer_packet(struct ma_usb_hdr_common *hdr,
 	/* Map all data chunks to data wrapper */
 	if (mausb_init_data_wrapper(result_data_wrapper, &chunks_list,
 				    num_of_data_chunks) < 0) {
-		mausb_pr_err("Data wrapper init failed");
+		dev_err(mausb_host_dev.this_device, "Data wrapper init failed");
 		status = -ENOMEM;
 		goto cleanup_data_chunks;
 	}
@@ -597,7 +598,7 @@ static int mausb_create_and_send_isoch_transfer_req(struct mausb_device *dev,
 						       start_of_segments,
 						       number_of_segments);
 	if (!hdr) {
-		mausb_pr_alert("Isoch transfer packet alloc failed");
+		dev_alert(mausb_host_dev.this_device, "Isoch transfer packet alloc failed");
 		return -ENOMEM;
 	}
 	*seq_n = (*seq_n + 1) % (MA_USB_TRANSFER_SEQN_MAX + 1);
@@ -605,7 +606,7 @@ static int mausb_create_and_send_isoch_transfer_req(struct mausb_device *dev,
 	status = mausb_prepare_isoch_out_transfer_packet(hdr, event, urb_ctx,
 							 &data_to_send);
 	if (status < 0) {
-		mausb_pr_alert("Failed to prepare transfer packet");
+		dev_alert(mausb_host_dev.this_device, "Failed to prepare transfer packet");
 		kfree(hdr);
 		return status;
 	}
@@ -632,7 +633,7 @@ static inline int __mausb_send_isoch_out_packet(struct mausb_device *dev,
 					*starting_segments,
 					index - *starting_segments);
 	if (status < 0) {
-		mausb_pr_err("ISOCH transfer request create and send failed");
+		dev_err(mausb_host_dev.this_device, "ISOCH transfer request create and send failed");
 		return status;
 	}
 	*starting_segments = index;
@@ -668,7 +669,7 @@ int mausb_send_isoch_out_msg(struct mausb_device *ma_dev,
 		if (chunk_size + MAUSB_ISOCH_STANDARD_FORMAT_SIZE >
 		    rem_transfer_buf) {
 			if (payload_size == 0) {
-				mausb_pr_warn("Fragmentation");
+				dev_warn(mausb_host_dev.this_device, "Fragmented");
 			} else {
 				status = __mausb_send_isoch_out_packet
 						(ma_dev, mausb_event, urb_ctx,
@@ -703,9 +704,9 @@ void mausb_receive_isoch_out(struct mausb_event *event)
 	struct urb *urb = (struct urb *)event->data.urb;
 	u16 i;
 
-	mausb_pr_debug("transfer_size=%d, rem_transfer_size=%d, status=%d",
-		       event->data.transfer_size, event->data.rem_transfer_size,
-		       event->status);
+	dev_vdbg(mausb_host_dev.this_device, "transfer_size=%d, rem_transfer_size=%d, status=%d",
+		 event->data.transfer_size, event->data.rem_transfer_size,
+		 event->status);
 
 	for (i = 0; i < urb->number_of_packets; ++i)
 		urb->iso_frame_desc[i].status = event->status;

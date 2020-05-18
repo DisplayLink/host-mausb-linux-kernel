@@ -5,7 +5,7 @@
 # Copyright (c) 2019 - 2020 DisplayLink (UK) Ltd.
 #
 
-config HOST_MAUSB
+config USB_HOST_MAUSB
 	tristate "Media Agnostic (MA) USB Host Driver"
 	depends on USB=y
 	default y

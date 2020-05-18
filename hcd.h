@@ -5,25 +5,17 @@
 #ifndef __MAUSB_HCD_H__
 #define __MAUSB_HCD_H__
 
-#include <linux/device.h>
-#include <linux/fs.h>
-#include <linux/major.h>
-#include <linux/proc_fs.h>
-#include <linux/rbtree.h>
 #include <linux/slab.h>
-#include <linux/uaccess.h>
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
 
 #include "hpal.h"
 
-#define DEVICE_NAME "mausb_host_hcd_dev"
+#define DEVICE_NAME "mausb_host_hcd"
 #define CLASS_NAME "mausb"
 
 #define NUMBER_OF_PORTS		15
-
 #define MAX_USB_DEVICE_DEPTH	6
-
 #define RESPONSE_TIMEOUT	5000
 
 enum mausb_device_type {

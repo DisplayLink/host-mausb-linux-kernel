@@ -4,14 +4,9 @@
  */
 #include "utils.h"
 
-#include <linux/atomic.h>
-#include <linux/cdev.h>
-#include <linux/completion.h>
-#include <linux/device.h>
 #include <linux/fs.h>
-#include <linux/mm.h>
+#include <linux/miscdevice.h>
 #include <linux/slab.h>
-#include <linux/uaccess.h>
 #include <linux/version.h>
 
 #include "mausb_driver_status.h"
@@ -19,14 +14,7 @@
 #define MAUSB_KERNEL_DEV_NAME "mausb_host"
 #define MAUSB_READ_DEVICE_TIMEOUT_MS 500
 
-static dev_t mausb_major_kernel;
-static struct cdev  mausb_kernel_dev;
-static struct class *mausb_kernel_class;
-
-static void mausb_vm_open(struct vm_area_struct *vma)
-{
-	mausb_pr_debug("");
-}
+struct miscdevice mausb_host_dev;
 
 static void mausb_vm_close(struct vm_area_struct *vma)
 {
@@ -34,7 +22,8 @@ static void mausb_vm_close(struct vm_area_struct *vma)
 	unsigned long flags = 0;
 	u64 ring_buffer_id = *(u64 *)(vma->vm_private_data);
 
-	mausb_pr_info("Releasing ring buffer with id: %llu", ring_buffer_id);
+	dev_info(mausb_host_dev.this_device, "Releasing ring buffer with id: %llu",
+		 ring_buffer_id);
 	spin_lock_irqsave(&mss.lock, flags);
 	list_for_each_entry_safe(buffer, next, &mss.available_ring_buffers,
 				 list_entry) {
@@ -48,7 +37,8 @@ static void mausb_vm_close(struct vm_area_struct *vma)
 	spin_unlock_irqrestore(&mss.lock, flags);
 }
 
-/* mausb_vm_fault is called the first time a memory area is accessed which is
+/*
+ * mausb_vm_fault is called the first time a memory area is accessed which is
  * not in memory
  */
 #if KERNEL_VERSION(4, 17, 0) <= LINUX_VERSION_CODE
@@ -60,24 +50,22 @@ static int mausb_vm_fault(struct vm_fault *vmf)
 static int mausb_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 #endif
 {
-	mausb_pr_debug("");
 	return 0;
 }
 
 static const struct vm_operations_struct mausb_vm_ops = {
-	.open  = mausb_vm_open,
 	.close = mausb_vm_close,
 	.fault = mausb_vm_fault,
 };
 
-static int mausb_file_open(struct inode *inode, struct file *filp)
+static int mausb_host_dev_open(struct inode *inode, struct file *filp)
 {
 	filp->private_data = NULL;
 
 	return 0;
 }
 
-static int mausb_file_close(struct inode *inode, struct file *filp)
+static int mausb_host_dev_release(struct inode *inode, struct file *filp)
 {
 	kfree(filp->private_data);
 	filp->private_data = NULL;
@@ -85,7 +73,7 @@ static int mausb_file_close(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static ssize_t mausb_file_read(struct file *filp, char __user *user_buffer,
+static ssize_t mausb_host_dev_read(struct file *filp, char __user *user_buffer,
 			       size_t size, loff_t *offset)
 {
 	ssize_t num_of_bytes_to_read = MAUSB_MAX_NUM_OF_MA_DEVS *
@@ -106,23 +94,23 @@ static ssize_t mausb_file_read(struct file *filp, char __user *user_buffer,
 	mausb_reset_heartbeat_cnt();
 
 	if ((ssize_t)size != num_of_bytes_to_read) {
-		mausb_pr_alert("The actual size differs from the expected number of bytes");
+		dev_alert(mausb_host_dev.this_device, "The actual size differs from the expected number of bytes");
 
 		fail_ret_val = MAUSB_DRIVER_BAD_READ_BUFFER_SIZE;
 		if (copy_to_user(user_buffer, &fail_ret_val,
 				 sizeof(fail_ret_val)) != 0) {
-			mausb_pr_warn("Failed to set error code.");
+			dev_warn(mausb_host_dev.this_device, "Failed to set error code.");
 		}
 		return MAUSB_DRIVER_READ_ERROR;
 	}
 
 	/* If suspend/hibernate happened delete all devices */
 	if (atomic_xchg(&mss.num_of_transitions_to_sleep, 0)) {
-		mausb_pr_alert("Suspend system event detected");
+		dev_alert(mausb_host_dev.this_device, "Suspend system event detected");
 		fail_ret_val = MAUSB_DRIVER_SYSTEM_SUSPENDED;
 		if (copy_to_user(user_buffer, &fail_ret_val,
 				 sizeof(fail_ret_val)) != 0) {
-			mausb_pr_warn("Failed to set error code.");
+			dev_warn(mausb_host_dev.this_device, "Failed to set error code.");
 		}
 		return MAUSB_DRIVER_READ_ERROR;
 	}
@@ -134,11 +122,11 @@ static ssize_t mausb_file_read(struct file *filp, char __user *user_buffer,
 	reinit_completion(ring_has_events);
 
 	if (atomic_read(&mss.rings_events.mausb_stop_reading_ring_events)) {
-		mausb_pr_alert("Ring events stopped");
+		dev_alert(mausb_host_dev.this_device, "Ring events stopped");
 		fail_ret_val = MAUSB_DRIVER_RING_EVENTS_STOPPED;
 		if (copy_to_user(user_buffer, &fail_ret_val,
 				 sizeof(fail_ret_val)) != 0) {
-			mausb_pr_warn("Failed to set error code.");
+			dev_warn(mausb_host_dev.this_device, "Failed to set error code.");
 		}
 		return MAUSB_DRIVER_READ_ERROR;
 	}
@@ -172,14 +160,14 @@ static ssize_t mausb_file_read(struct file *filp, char __user *user_buffer,
 		copy_to_user(user_buffer, &mss.events,
 			     (unsigned long)num_of_bytes_to_read);
 
-	mausb_pr_debug("num_of_bytes_not_copied %lu, num_of_bytes_to_read %zd",
-		       num_of_bytes_not_copied, num_of_bytes_to_read);
+	dev_vdbg(mausb_host_dev.this_device, "num_of_bytes_not_copied %lu, num_of_bytes_to_read %zd",
+		 num_of_bytes_not_copied, num_of_bytes_to_read);
 
 	if (num_of_bytes_not_copied) {
 		fail_ret_val = MAUSB_DRIVER_COPY_TO_BUFFER_FAILED;
 		if (copy_to_user(user_buffer, &fail_ret_val,
 				 sizeof(fail_ret_val)) != 0) {
-			mausb_pr_warn("Failed to set error code.");
+			dev_warn(mausb_host_dev.this_device, "Failed to set error code.");
 		}
 		return MAUSB_DRIVER_READ_ERROR;
 	}
@@ -187,8 +175,9 @@ static ssize_t mausb_file_read(struct file *filp, char __user *user_buffer,
 	return num_of_bytes_to_read;
 }
 
-static ssize_t mausb_file_write(struct file *filp, const char __user *buffer,
-				size_t size, loff_t *offset)
+static ssize_t mausb_host_dev_write(struct file *filp,
+				    const char __user *buffer, size_t size,
+				    loff_t *offset)
 {
 	ssize_t num_of_bytes_to_write =
 				sizeof(struct mausb_events_notification);
@@ -197,7 +186,7 @@ static ssize_t mausb_file_write(struct file *filp, const char __user *buffer,
 	struct mausb_device *dev;
 
 	if (size != (size_t)num_of_bytes_to_write) {
-		mausb_pr_alert("The actual size differs from the expected number of bytes");
+		dev_alert(mausb_host_dev.this_device, "The actual size differs from the expected number of bytes");
 
 		return MAUSB_DRIVER_WRITE_ERROR;
 	}
@@ -244,7 +233,7 @@ static int mausb_mmap(struct file *filp, struct vm_area_struct *vma)
 
 	ret = mausb_ring_buffer_init(ring_buffer);
 	if (ret < 0) {
-		mausb_pr_err("Ring buffer init failed");
+		dev_err(mausb_host_dev.this_device, "Ring buffer init failed");
 		goto release_ring_buffer;
 	}
 
@@ -257,19 +246,18 @@ static int mausb_mmap(struct file *filp, struct vm_area_struct *vma)
 	filp->private_data = vma->vm_private_data;
 
 	if (size > mausb_ring_buffer_length()) {
-		mausb_pr_err("Invalid memory size to map");
+		dev_err(mausb_host_dev.this_device, "Invalid memory size to map");
 		ret = -EINVAL;
 		goto release_ring_buffer;
 	}
 
 	vma->vm_ops = &mausb_vm_ops;
-	mausb_vm_open(vma);
 
 	page = virt_to_page(ring_buffer->to_user_buffer);
 	ret = remap_pfn_range(vma, vma->vm_start, page_to_pfn(page), size,
 			      vma->vm_page_prot);
 	if (ret < 0) {
-		mausb_pr_err("Could not map the address area");
+		dev_err(mausb_host_dev.this_device, "Could not map the address area");
 		goto release_ring_buffer;
 	}
 
@@ -277,7 +265,8 @@ static int mausb_mmap(struct file *filp, struct vm_area_struct *vma)
 	ring_buffer->id = mss.ring_buffer_id++;
 	*(u64 *)(vma->vm_private_data) = ring_buffer->id;
 	list_add_tail(&ring_buffer->list_entry, &mss.available_ring_buffers);
-	mausb_pr_info("Allocated ring buffer with id: %llu", ring_buffer->id);
+	dev_info(mausb_host_dev.this_device, "Allocated ring buffer with id: %llu",
+		 ring_buffer->id);
 	spin_unlock_irqrestore(&mss.lock, flags);
 
 	return 0;
@@ -288,56 +277,26 @@ release_ring_buffer:
 	return ret;
 }
 
-static const struct file_operations mausb_file_ops = {
-	.open	 = mausb_file_open,
-	.release = mausb_file_close,
-	.read	 = mausb_file_read,
-	.write   = mausb_file_write,
+static const struct file_operations mausb_host_dev_fops = {
+	.open	 = mausb_host_dev_open,
+	.release = mausb_host_dev_release,
+	.read	 = mausb_host_dev_read,
+	.write   = mausb_host_dev_write,
 	.mmap	 = mausb_mmap,
 };
 
-int mausb_create_dev(void)
+int mausb_host_dev_register(void)
 {
-	int device_created = 0;
-	int status = alloc_chrdev_region(&mausb_major_kernel, 0, 1,
-					 MAUSB_KERNEL_DEV_NAME "_proc");
-	if (status)
-		goto cleanup;
-
-	mausb_kernel_class = class_create(THIS_MODULE,
-					  MAUSB_KERNEL_DEV_NAME "_sys");
-	if (!mausb_kernel_class) {
-		status = -ENOMEM;
-		goto cleanup;
-	}
-
-	if (!device_create(mausb_kernel_class, NULL, mausb_major_kernel, NULL,
-			   MAUSB_KERNEL_DEV_NAME "_dev")) {
-		status = -ENOMEM;
-		goto cleanup;
-	}
-	device_created = 1;
-	cdev_init(&mausb_kernel_dev, &mausb_file_ops);
-	status = cdev_add(&mausb_kernel_dev, mausb_major_kernel, 1);
-	if (status)
-		goto cleanup;
-	return 0;
-cleanup:
-	mausb_cleanup_dev(device_created);
-	return status;
+	mausb_host_dev.minor = MISC_DYNAMIC_MINOR;
+	mausb_host_dev.name = MAUSB_KERNEL_DEV_NAME;
+	mausb_host_dev.fops = &mausb_host_dev_fops;
+	mausb_host_dev.mode = 0;
+	return misc_register(&mausb_host_dev);
 }
 
-void mausb_cleanup_dev(int device_created)
+void mausb_host_dev_deregister(void)
 {
-	if (device_created) {
-		device_destroy(mausb_kernel_class, mausb_major_kernel);
-		cdev_del(&mausb_kernel_dev);
-	}
-
-	if (mausb_kernel_class)
-		class_destroy(mausb_kernel_class);
-
-	unregister_chrdev_region(mausb_major_kernel, 1);
+	misc_deregister(&mausb_host_dev);
 }
 
 void mausb_notify_completed_user_events(struct mausb_ring_buffer *ring_buffer)
@@ -346,16 +305,16 @@ void mausb_notify_completed_user_events(struct mausb_ring_buffer *ring_buffer)
 
 	completed =
 		atomic_inc_return(&ring_buffer->mausb_completed_user_events);
-	mausb_pr_debug("mausb_completed_user_events INCREMENTED %d", completed);
+	dev_vdbg(mausb_host_dev.this_device, "mausb_completed_user_events INCREMENTED %d",
+		 completed);
 	if (completed > MAUSB_RING_BUFFER_SIZE / 16)
 		complete(&mss.rings_events.mausb_ring_has_events);
 }
 
 void mausb_notify_ring_events(struct mausb_ring_buffer *ring_buffer)
 {
-	int events;
+	int events = atomic_inc_return(&ring_buffer->mausb_ring_events);
 
-	events = atomic_inc_return(&ring_buffer->mausb_ring_events);
 	if (events == 1)
 		complete(&mss.rings_events.mausb_ring_has_events);
 }

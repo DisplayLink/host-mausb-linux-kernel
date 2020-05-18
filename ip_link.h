@@ -5,13 +5,16 @@
 #ifndef __MAUSB_IP_LINK_H__
 #define __MAUSB_IP_LINK_H__
 
+#include <linux/in.h>
+#include <linux/in6.h>
 #include <linux/inet.h>
 #include <linux/list.h>
 #include <linux/workqueue.h>
-#include <net/net_namespace.h>
 
 #define MAUSB_LINK_BUFF_SIZE	16777216
 #define MAUSB_LINK_TOS_LEVEL_EF 0xB8
+
+extern struct miscdevice mausb_host_dev;
 
 enum mausb_link_action {
 	MAUSB_LINK_CONNECT	= 0,

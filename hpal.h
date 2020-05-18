@@ -5,7 +5,8 @@
 #ifndef __MAUSB_HPAL_H__
 #define __MAUSB_HPAL_H__
 
-#include <linux/kref.h>
+#include <linux/miscdevice.h>
+#include <linux/scatterlist.h>
 #include <linux/suspend.h>
 #include <linux/usb.h>
 
@@ -26,6 +27,7 @@
 
 extern struct mss mss;
 extern struct mausb_hcd *mhcd;
+extern struct miscdevice mausb_host_dev;
 
 enum mausb_isoch_header_format_size {
 	MAUSB_ISOCH_SHORT_FORMAT_SIZE	 = 4,

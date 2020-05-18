@@ -171,8 +171,19 @@ struct mausb_mgmt_event {
 };
 
 struct mausb_data_event {
+#if defined(__KERNEL__)
 	uintptr_t urb;
 	uintptr_t recv_buf;
+#else
+#if (defined(MAUSB_KERNEL_BITNESS) && MAUSB_KERNEL_BITNESS == 32) && \
+	__WORDSIZE == 32
+	u32 urb;
+	u32 recv_buf;
+#else
+	u64 urb;
+	u64 recv_buf;
+#endif
+#endif
 	u32 iterator_seek_delta;
 	u32 transfer_size;
 	u32 rem_transfer_size;

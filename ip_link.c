@@ -4,16 +4,7 @@
  */
 #include "ip_link.h"
 
-#include <linux/in.h>
-#include <linux/inet.h>
-#include <linux/jiffies.h>
-#include <linux/kernel.h>
-#include <linux/net.h>
-#include <linux/skbuff.h>
-#include <linux/socket.h>
 #include <linux/version.h>
-#include <linux/workqueue.h>
-#include <net/sock.h>
 #include <net/tcp.h>
 
 #include "utils.h"
@@ -58,8 +49,8 @@ int mausb_init_ip_ctx(struct mausb_ip_ctx **ip_ctx,
 		ctx->dev_addr_in.sa_in6.sin6_port = htons(port);
 #endif
 	} else {
-		mausb_pr_err("Invalid IP address received: address=%s",
-			     ip_addr);
+		dev_err(mausb_host_dev.this_device, "Invalid IP address received: address=%s",
+			ip_addr);
 		kfree(ctx);
 		return -EINVAL;
 	}
@@ -132,8 +123,8 @@ static void __mausb_ip_set_options(struct socket *sock, bool udp)
 		status = kernel_setsockopt(sock, IPPROTO_TCP, TCP_NODELAY,
 					   (char *)&optval, optlen);
 		if (status < 0)
-			mausb_pr_warn("Failed to set tcp no delay option: status=%d",
-				      status);
+			dev_warn(mausb_host_dev.this_device, "Failed to set tcp no delay option: status=%d",
+				 status);
 	}
 #if KERNEL_VERSION(5, 1, 0) <= LINUX_VERSION_CODE
 	status = kernel_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO_NEW,
@@ -144,8 +135,8 @@ static void __mausb_ip_set_options(struct socket *sock, bool udp)
 #endif
 
 	if (status < 0)
-		mausb_pr_warn("Failed to set recv timeout option: status=%d",
-			      status);
+		dev_warn(mausb_host_dev.this_device, "Failed to set recv timeout option: status=%d",
+			 status);
 
 #if KERNEL_VERSION(5, 1, 0) <= LINUX_VERSION_CODE
 	status = kernel_setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO_NEW,
@@ -156,28 +147,29 @@ static void __mausb_ip_set_options(struct socket *sock, bool udp)
 #endif
 
 	if (status < 0)
-		mausb_pr_warn("Failed to set snd timeout option: status=%d",
-			      status);
+		dev_warn(mausb_host_dev.this_device, "Failed to set snd timeout option: status=%d",
+			 status);
 
 	optval = MAUSB_LINK_BUFF_SIZE;
 	status  = kernel_setsockopt(sock, SOL_SOCKET, SO_RCVBUF,
 				    (char *)&optval, optlen);
 	if (status < 0)
-		mausb_pr_warn("Failed to set recv buffer size: status=%d",
-			      status);
+		dev_warn(mausb_host_dev.this_device, "Failed to set recv buffer size: status=%d",
+			 status);
 
 	optval = MAUSB_LINK_BUFF_SIZE;
 	status  = kernel_setsockopt(sock, SOL_SOCKET, SO_SNDBUF,
 				    (char *)&optval, optlen);
 	if (status < 0)
-		mausb_pr_warn("Failed to set send buffer size: status=%d",
-			      status);
+		dev_warn(mausb_host_dev.this_device, "Failed to set send buffer size: status=%d",
+			 status);
 
 	optval = MAUSB_LINK_TOS_LEVEL_EF;
 	status  = kernel_setsockopt(sock, IPPROTO_IP, IP_TOS,
 				    (char *)&optval, optlen);
 	if (status < 0)
-		mausb_pr_warn("Failed to set QOS: status=%d", status);
+		dev_warn(mausb_host_dev.this_device, "Failed to set QOS: status=%d",
+			 status);
 }
 
 static void __mausb_ip_connect(struct work_struct *work)
@@ -199,8 +191,8 @@ static void __mausb_ip_connect(struct work_struct *work)
 				     &ip_ctx->client_socket);
 #endif /* #if KERNEL_VERSION(4, 2, 0) <= LINUX_VERSION_CODE */
 		if (status < 0) {
-			mausb_pr_err("Failed to create socket: status=%d",
-				     status);
+			dev_err(mausb_host_dev.this_device, "Failed to create socket: status=%d",
+				status);
 			goto callback;
 		}
 	} else {
@@ -212,8 +204,8 @@ static void __mausb_ip_connect(struct work_struct *work)
 				     &ip_ctx->client_socket);
 #endif /* #if KERNEL_VERSION(4, 2, 0) <= LINUX_VERSION_CODE */
 		if (status < 0) {
-			mausb_pr_err("Failed to create socket: status=%d",
-				     status);
+			dev_err(mausb_host_dev.this_device, "Failed to create socket: status=%d",
+				status);
 			goto callback;
 		}
 	}
@@ -224,7 +216,7 @@ static void __mausb_ip_connect(struct work_struct *work)
 	if (family == AF_INET) {
 		sa = (struct sockaddr *)&ip_ctx->dev_addr_in.sa_in;
 		sa_size = sizeof(ip_ctx->dev_addr_in.sa_in);
-		mausb_pr_info("Connecting to %pI4:%d, status=%d",
+		dev_info(mausb_host_dev.this_device, "Connecting to %pI4:%d, status=%d",
 			      &ip_ctx->dev_addr_in.sa_in.sin_addr,
 			      htons(ip_ctx->dev_addr_in.sa_in.sin_port),
 			      status);
@@ -232,20 +224,21 @@ static void __mausb_ip_connect(struct work_struct *work)
 	} else if (family == AF_INET6) {
 		sa = (struct sockaddr *)&ip_ctx->dev_addr_in.sa_in6;
 		sa_size = sizeof(ip_ctx->dev_addr_in.sa_in6);
-		mausb_pr_info("Connecting to %pI6c:%d, status=%d",
+		dev_info(mausb_host_dev.this_device, "Connecting to %pI6c:%d, status=%d",
 			      &ip_ctx->dev_addr_in.sa_in6.sin6_addr,
 			      htons(ip_ctx->dev_addr_in.sa_in6.sin6_port),
 			      status);
 #endif
 	} else {
-		mausb_pr_err("Wrong network family provided");
+		dev_err(mausb_host_dev.this_device, "Wrong network family provided");
 		status = -EINVAL;
 		goto callback;
 	}
 
 	status = kernel_connect(ip_ctx->client_socket, sa, sa_size, O_RDWR);
 	if (status < 0) {
-		mausb_pr_err("Failed to connect to host, status=%d", status);
+		dev_err(mausb_host_dev.this_device, "Failed to connect to host, status=%d",
+			status);
 		goto clear_socket;
 	}
 
@@ -279,7 +272,7 @@ int mausb_ip_send(struct mausb_ip_ctx *ip_ctx,
 	struct msghdr msghd;
 
 	if (!ip_ctx) {
-		mausb_pr_alert("Socket ctx is NULL!");
+		dev_alert(mausb_host_dev.this_device, "Socket ctx is NULL!");
 		return -EINVAL;
 	}
 
@@ -333,8 +326,8 @@ static int __mausb_ip_recv(struct mausb_ip_ctx *ip_ctx)
 						   (char *)&optval,
 						   sizeof(optval));
 			if (status != 0) {
-				mausb_pr_warn("Setting TCP_QUICKACK failed, status=%d",
-					      status);
+				dev_warn(mausb_host_dev.this_device, "Setting TCP_QUICKACK failed, status=%d",
+					 status);
 			}
 		}
 
@@ -343,7 +336,8 @@ static int __mausb_ip_recv(struct mausb_ip_ctx *ip_ctx)
 		if (status == -EAGAIN) {
 			return -EAGAIN;
 		} else if (status <= 0) {
-			mausb_pr_warn("kernel_recvmsg, status=%d", status);
+			dev_warn(mausb_host_dev.this_device, "kernel_recvmsg, status=%d",
+				 status);
 
 			__mausb_ip_recv_ctx_free(&ip_ctx->recv_ctx);
 			ip_ctx->fn_callback(ip_ctx->ctx, ip_ctx->channel,
@@ -351,7 +345,8 @@ static int __mausb_ip_recv(struct mausb_ip_ctx *ip_ctx)
 			return status;
 		}
 
-		mausb_pr_debug("kernel_recvmsg, status=%d", status);
+		dev_vdbg(mausb_host_dev.this_device, "kernel_recvmsg, status=%d",
+			 status);
 
 		if (peek) {
 			if ((unsigned int)status <

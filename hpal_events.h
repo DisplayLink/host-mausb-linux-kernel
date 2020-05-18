@@ -6,8 +6,6 @@
 #define __MAUSB_HPAL_EVENTS_H__
 
 #include "hpal.h"
-#include "ip_link.h"
-#include "mausb_event.h"
 
 #define MANAGEMENT_EVENT_TIMEOUT 3000
 
@@ -78,6 +76,8 @@ int mausb_canceltransfer_event_from_user(struct mausb_device *dev,
 					 struct mausb_event *event);
 
 void mausb_dev_reset_req_event(struct mausb_event *event);
+int mausb_canceltransfer_event_from_user(struct mausb_device *dev,
+					 struct mausb_event *event);
 void mausb_cleanup_send_data_msg_event(struct mausb_event *event);
 void mausb_cleanup_received_data_msg_event(struct mausb_event *event);
 void mausb_cleanup_delete_data_transfer_event(struct mausb_event *event);
