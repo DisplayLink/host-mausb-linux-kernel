@@ -18,7 +18,7 @@ static int mausb_mgmt_msg_received_event(struct mausb_event *event,
 {
 	int status = 0;
 
-	dev_info(mausb_host_dev.this_device, "channel=%d, type=%d", channel,
+	dev_vdbg(mausb_host_dev.this_device, "channel=%d, type=%d", channel,
 		 hdr->type);
 	if (hdr->length <= MAUSB_MAX_MGMT_SIZE) {
 		event->type = MAUSB_EVENT_TYPE_RECEIVED_MGMT_MSG;
@@ -160,8 +160,8 @@ int mausb_usbdevhandle_event_to_user(struct mausb_device *dev,
 
 	status = mausb_wait_for_completion(&event, event_id, dev);
 	if (status < 0) {
-		dev_err(mausb_host_dev.this_device, "Usbdevhandle failed, event_id=%lld",
-			event_id);
+		dev_warn(mausb_host_dev.this_device, "USBDevHandle failed, dev_handle=%#x, event_id=%lld, status=%d",
+			 event.mgmt.dev_handle.dev_handle, event_id, status);
 		return status;
 	}
 
@@ -198,8 +198,9 @@ int mausb_ephandle_event_to_user(struct mausb_device *dev,
 
 	status = mausb_wait_for_completion(&event, event_id, dev);
 	if (status < 0) {
-		dev_err(mausb_host_dev.this_device, "Ephandle failed, event_id=%lld",
-			event_id);
+		dev_warn(mausb_host_dev.this_device, "EPHandle failed, ep_handle=%#x, dev_handle=%#x, event_id=%lld, status=%d",
+			 event.mgmt.ep_handle.ep_handle, device_handle,
+			 event_id, status);
 		return status;
 	}
 
@@ -232,8 +233,9 @@ int mausb_epactivate_event_to_user(struct mausb_device *dev,
 
 	status = mausb_wait_for_completion(&event, event_id, dev);
 	if (status < 0) {
-		dev_err(mausb_host_dev.this_device, "Epactivate failed, event_id=%lld",
-			event_id);
+		dev_warn(mausb_host_dev.this_device, "Epactivate failed, ep_handle=%#x, dev_handle=%#x, event_id=%lld, status=%d",
+			event.mgmt.ep_activate.ep_handle, device_handle,
+			event_id, status);
 		return status;
 	}
 
@@ -261,10 +263,10 @@ int mausb_epinactivate_event_to_user(struct mausb_device *dev,
 	event.madev_addr			= dev->madev_addr;
 
 	status = mausb_wait_for_completion(&event, event_id, dev);
-
 	if (status < 0) {
-		dev_err(mausb_host_dev.this_device, "Epinactivate failed, event_id=%lld",
-			event_id);
+		dev_warn(mausb_host_dev.this_device, "EPInactivate failed, ep_handle=%#x, dev_handle=%#x, event_id=%lld, status=%d",
+			event.mgmt.ep_inactivate.ep_handle, device_handle,
+			event_id, status);
 		return status;
 	}
 
@@ -295,8 +297,9 @@ int mausb_epreset_event_to_user(struct mausb_device *dev,
 
 	status = mausb_wait_for_completion(&event, event_id, dev);
 	if (status < 0) {
-		dev_err(mausb_host_dev.this_device, "Epreset failed, event_id=%lld",
-			event_id);
+		dev_warn(mausb_host_dev.this_device, "EPReset failed, ep_handle=%#x, dev_handle=%#x, event_id=%lld, status=%d",
+			 event.mgmt.ep_reset.ep_handle, device_handle, event_id,
+			 status);
 		return status;
 	}
 
@@ -324,8 +327,9 @@ int mausb_epdelete_event_to_user(struct mausb_device *dev,
 
 	status = mausb_wait_for_completion(&event, event_id, dev);
 	if (status < 0) {
-		dev_err(mausb_host_dev.this_device, "Epdelete failed, event_id=%lld",
-			event_id);
+		dev_warn(mausb_host_dev.this_device, "EPDelete failed, ep_handle=%#x, dev_handle=%#x, event_id=%lld, status=%d",
+			 event.mgmt.ep_delete.ep_handle, device_handle,
+			 event_id, status);
 		return status;
 	}
 
@@ -355,8 +359,9 @@ int mausb_modifyep0_event_to_user(struct mausb_device *dev,
 
 	status = mausb_wait_for_completion(&event, event_id, dev);
 	if (status < 0) {
-		dev_err(mausb_host_dev.this_device, "ModifyEP0 failed, event_id=%lld",
-			event_id);
+		dev_warn(mausb_host_dev.this_device, "ModifyEP0 failed, ep_handle=%#x, dev_handle=%#x, event_id=%lld, status=%d",
+			 event.mgmt.modify_ep0.ep_handle, device_handle,
+			 event_id, status);
 		return status;
 	}
 
@@ -390,8 +395,8 @@ int mausb_setusbdevaddress_event_to_user(struct mausb_device *dev,
 
 	status = mausb_wait_for_completion(&event, event_id, dev);
 	if (status < 0) {
-		dev_err(mausb_host_dev.this_device, "SetUSBDevAddress failed, event_id=%lld",
-			     event_id);
+		dev_warn(mausb_host_dev.this_device, "SetUSBDevAddress failed, dev_handle=%#x, event_id=%lld, status=%d",
+			 device_handle, event_id, status);
 		return status;
 	}
 
@@ -460,8 +465,8 @@ int mausb_updatedev_event_to_user(struct mausb_device *dev,
 
 	status = mausb_wait_for_completion(&event, event_id, dev);
 	if (status < 0) {
-		dev_err(mausb_host_dev.this_device, "UpdateDev failed, event_id=%lld",
-			event_id);
+		dev_warn(mausb_host_dev.this_device, "UpdateDev failed, dev_handle=%#x, event_id=%lld, status=%d",
+			 device_handle, event_id, status);
 		return status;
 	}
 
@@ -486,7 +491,8 @@ int mausb_usbdevdisconnect_event_to_user(struct mausb_device *dev,
 
 	status = mausb_enqueue_event_to_user(dev, &event);
 	if (status < 0)
-		dev_err(mausb_host_dev.this_device, "Ring buffer full, usbdevdisconnect failed");
+		dev_warn(mausb_host_dev.this_device, "USBDevDisconnect failed, dev_handle=%#x, status=%d",
+			 dev_handle, status);
 
 	return status;
 }
@@ -501,25 +507,37 @@ int mausb_ping_event_to_user(struct mausb_device *dev)
 
 	status = mausb_enqueue_event_to_user(dev, &event);
 	if (status < 0)
-		dev_err(mausb_host_dev.this_device, "Ring buffer full, devdisconnect failed");
+		dev_warn(mausb_host_dev.this_device, "Ping failed, status=%d",
+			 status);
 
 	return status;
 }
 
-__attribute__((unused))
-static int mausb_devdisconnect_event_to_user(struct mausb_device *dev)
+int mausb_devdisconnect_event_to_user(struct mausb_device *dev)
 {
 	struct mausb_event event;
 	int status;
+	u64 event_id = mausb_event_id(dev);
 
-	event.type	 = MAUSB_EVENT_TYPE_DEV_DISCONNECT;
-	event.madev_addr = dev->madev_addr;
+	event.type				= MAUSB_EVENT_TYPE_DEV_DISCONNECT;
+	event.mgmt.dev_disconnect.event_id	= event_id;
+	event.madev_addr			= dev->madev_addr;
 
-	status = mausb_enqueue_event_to_user(dev, &event);
-	if (status < 0)
-		dev_err(mausb_host_dev.this_device, "Ring buffer full, devdisconnect failed");
+	status = mausb_wait_for_completion(&event, event_id, dev);
+	if (status < 0) {
+		dev_warn(mausb_host_dev.this_device, "DevDisconnect failed, event_id=%lld, status=%d",
+			 event_id, status);
+		return status;
+	}
 
-	return status;
+	return event.status;
+}
+
+int mausb_devdisconnect_event_from_user(struct mausb_device *dev,
+					struct mausb_event *event)
+{
+       return mausb_signal_event(dev, event,
+				 event->mgmt.dev_disconnect.event_id);
 }
 
 int mausb_usbdevreset_event_to_user(struct mausb_device *dev,
@@ -535,10 +553,9 @@ int mausb_usbdevreset_event_to_user(struct mausb_device *dev,
 	event.madev_addr		       = dev->madev_addr;
 
 	status = mausb_wait_for_completion(&event, event_id, dev);
-
 	if (status < 0) {
-		dev_err(mausb_host_dev.this_device, "UsbDevReset failed, event_id=%lld",
-			event_id);
+		dev_warn(mausb_host_dev.this_device, "UsbDevReset failed, dev_handle=%#x, event_id=%lld, status=%d",
+			 device_handle, event_id, status);
 		return status;
 	}
 
@@ -566,11 +583,10 @@ int mausb_canceltransfer_event_to_user(struct mausb_device *dev,
 	event.madev_addr			 = dev->madev_addr;
 
 	status = mausb_enqueue_event_to_user(dev, &event);
-	if (status < 0) {
-		dev_err(mausb_host_dev.this_device, "Ring buffer full, canceltransfer failed");
-		return status;
-	}
-
+	if (status < 0)
+		dev_warn(mausb_host_dev.this_device, "CancelTransfer failed, ep_handle=%#x, dev_handle=%#x, status=%d",
+			 event.mgmt.modify_ep0.ep_handle, device_handle,
+			 status);
 	return status;
 }
 
@@ -578,6 +594,37 @@ int mausb_canceltransfer_event_from_user(struct mausb_device *dev,
 					 struct mausb_event *event)
 {
 	return 0;
+}
+
+int mausb_cleartransfers_event_to_user(struct mausb_device *dev,
+				       u16 device_handle, u16 ep_handle)
+{
+	struct mausb_event event;
+	int  status;
+	u64 event_id = mausb_event_id(dev);
+
+	event.type = MAUSB_EVENT_TYPE_CLEAR_TRANSFERS;
+	event.mgmt.clear_transfers.device_handle	= device_handle;
+	event.mgmt.clear_transfers.ep_handle		= ep_handle;
+	event.mgmt.clear_transfers.event_id		= event_id;
+	event.madev_addr				= dev->madev_addr;
+
+	status = mausb_wait_for_completion(&event, event_id, dev);
+	if (status < 0) {
+		dev_warn(mausb_host_dev.this_device, "ClearTransfers failed, ep_handle=%#x, dev_handle=%#x, event_id=%lld, status=%d",
+			 event.mgmt.clear_transfers.ep_handle, device_handle,
+			 event_id, status);
+		return status;
+	}
+
+	return event.status;
+}
+
+int mausb_cleartransfers_event_from_user(struct mausb_device *dev,
+					 struct mausb_event *event)
+{
+	return mausb_signal_event(dev, event,
+				  event->mgmt.clear_transfers.event_id);
 }
 
 void mausb_cleanup_send_data_msg_event(struct mausb_event *event)

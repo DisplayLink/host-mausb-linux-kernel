@@ -7,6 +7,7 @@
 #include <linux/fs.h>
 #include <linux/miscdevice.h>
 #include <linux/slab.h>
+#include <linux/uaccess.h>
 #include <linux/version.h>
 
 #include "mausb_driver_status.h"
@@ -14,12 +15,10 @@
 #define MAUSB_KERNEL_DEV_NAME "mausb_host"
 #define MAUSB_READ_DEVICE_TIMEOUT_MS 500
 
-struct miscdevice mausb_host_dev;
-
 static void mausb_vm_close(struct vm_area_struct *vma)
 {
 	struct mausb_ring_buffer *buffer = NULL, *next = NULL;
-	unsigned long flags = 0;
+	unsigned long flags;
 	u64 ring_buffer_id = *(u64 *)(vma->vm_private_data);
 
 	dev_info(mausb_host_dev.this_device, "Releasing ring buffer with id: %llu",
@@ -74,7 +73,7 @@ static int mausb_host_dev_release(struct inode *inode, struct file *filp)
 }
 
 static ssize_t mausb_host_dev_read(struct file *filp, char __user *user_buffer,
-			       size_t size, loff_t *offset)
+				   size_t size, loff_t *offset)
 {
 	ssize_t num_of_bytes_to_read = MAUSB_MAX_NUM_OF_MA_DEVS *
 				       sizeof(struct mausb_events_notification);
@@ -225,7 +224,7 @@ static int mausb_mmap(struct file *filp, struct vm_area_struct *vma)
 	unsigned long size = vma->vm_end - vma->vm_start;
 	int ret;
 	struct page *page = NULL;
-	unsigned long flags = 0;
+	unsigned long flags;
 	struct mausb_ring_buffer *ring_buffer = kzalloc(sizeof(*ring_buffer),
 							GFP_KERNEL);
 	if (!ring_buffer)
@@ -285,12 +284,15 @@ static const struct file_operations mausb_host_dev_fops = {
 	.mmap	 = mausb_mmap,
 };
 
+struct miscdevice mausb_host_dev = {
+	.minor	= MISC_DYNAMIC_MINOR,
+	.name	= MAUSB_KERNEL_DEV_NAME,
+	.fops	= &mausb_host_dev_fops,
+	.mode	= 0644,
+};
+
 int mausb_host_dev_register(void)
 {
-	mausb_host_dev.minor = MISC_DYNAMIC_MINOR;
-	mausb_host_dev.name = MAUSB_KERNEL_DEV_NAME;
-	mausb_host_dev.fops = &mausb_host_dev_fops;
-	mausb_host_dev.mode = 0;
 	return misc_register(&mausb_host_dev);
 }
 
@@ -315,7 +317,7 @@ void mausb_notify_ring_events(struct mausb_ring_buffer *ring_buffer)
 {
 	int events = atomic_inc_return(&ring_buffer->mausb_ring_events);
 
-	if (events == 1)
+	if (events > 0)
 		complete(&mss.rings_events.mausb_ring_has_events);
 }
 

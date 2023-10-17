@@ -26,6 +26,7 @@
 #define MAUSB_EVENT_TYPE_DEV_DISCONNECT			13u
 #define MAUSB_EVENT_TYPE_USB_DEV_RESET			14u
 #define MAUSB_EVENT_TYPE_CANCEL_TRANSFER		15u
+#define MAUSB_EVENT_TYPE_CLEAR_TRANSFERS		16u
 
 #define MAUSB_EVENT_TYPE_PORT_CHANGED			80u
 #define MAUSB_EVENT_TYPE_SEND_MGMT_MSG			81u
@@ -136,6 +137,16 @@ struct mausb_canceltransfer {
 	u16 ep_handle;
 };
 
+struct mausb_cleartransfers {
+	u64 event_id;
+	u16 device_handle;
+	u16 ep_handle;
+};
+
+struct mausb_devdisconnect {
+	u64 event_id;
+};
+
 struct mausb_mgmt_hdr {
 	__aligned(4) char hdr[MAUSB_MAX_MGMT_SIZE];
 };
@@ -164,6 +175,8 @@ struct mausb_mgmt_event {
 		struct mausb_usbdevreset	usb_dev_reset;
 		struct mausb_usbdevdisconnect	usb_dev_disconnect;
 		struct mausb_canceltransfer	cancel_transfer;
+		struct mausb_cleartransfers	clear_transfers;
+		struct mausb_devdisconnect	dev_disconnect;
 		struct mausb_mgmt_hdr		mgmt_hdr;
 		struct mausb_mgmt_req_timedout	mgmt_req_timedout;
 		struct mausb_delete_ma_dev	delete_ma_dev;

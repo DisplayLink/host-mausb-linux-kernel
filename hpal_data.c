@@ -57,8 +57,8 @@ void mausb_receive_in_data(struct mausb_event *event,
 						 payload_size);
 
 	dev_vdbg(mausb_host_dev.this_device, "data_written=%d, payload_size=%d",
-		 data_written,
-		       payload_size);
+		 data_written, payload_size);
+
 	event->data.rem_transfer_size -= data_written;
 
 	if (event->data.transfer_eot) {
@@ -174,7 +174,6 @@ int mausb_send_out_data_msg(struct mausb_device *dev, struct mausb_event *event,
 
 	status = mausb_prepare_transfer_packet(&data, event,
 					       &urb_ctx->iterator);
-
 	if (status < 0) {
 		dev_err(mausb_host_dev.this_device, "Failed to prepare transfer packet");
 		return status;

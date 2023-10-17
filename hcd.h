@@ -11,31 +11,32 @@
 
 #include "hpal.h"
 
+#define DRIVER_NAME "mausb_host"
 #define DEVICE_NAME "mausb_host_hcd"
-#define CLASS_NAME "mausb"
 
 #define NUMBER_OF_PORTS		15
-#define MAX_USB_DEVICE_DEPTH	6
-#define RESPONSE_TIMEOUT	5000
+/* Response Timeout in ms (MA-USB v1.0a, Table 43) */
+#define RESPONSE_TIMEOUT_MS	5000
 
+/* MA-USB v1.0a, Table 12 */
 enum mausb_device_type {
 	USBDEVICE = 0,
 	USB20HUB  = 1,
-	USB30HUB  = 2
+	USB30HUB  = 2,
 };
 
+/* MA-USB v1.0a, Table 15 */
 enum mausb_device_speed {
 	LOW_SPEED	 = 0,
 	FULL_SPEED	 = 1,
 	HIGH_SPEED	 = 2,
 	SUPER_SPEED	 = 3,
-	SUPER_SPEED_PLUS = 4
+	SUPER_SPEED_PLUS = 4,
 };
 
 struct mausb_hcd {
 	spinlock_t	lock;	/* Protect HCD during URB processing */
-	struct device	*pdev;
-	u16		connected_ports;
+	u8		connected_ports;
 
 	struct rb_root	mausb_urbs;
 	struct hub_ctx	*hcd_ss_ctx;
@@ -51,18 +52,17 @@ struct mausb_dev {
 };
 
 struct hub_ctx {
-	struct mausb_hcd *mhcd;
 	struct usb_hcd	 *hcd;
 	struct mausb_dev ma_devs[NUMBER_OF_PORTS];
 };
 
-int mausb_init_hcd(void);
-void mausb_deinit_hcd(void);
+int mausb_host_driver_init(void);
+void mausb_host_driver_deinit(void);
 
 void mausb_port_has_changed(const enum mausb_device_type device_type,
 			    const enum mausb_device_speed device_speed,
 			    void *ma_dev);
-void mausb_hcd_disconnect(const u16 port_number,
+void mausb_hcd_disconnect(const u8 port_number,
 			  const enum mausb_device_type device_type,
 			  const enum mausb_device_speed device_speed);
 
@@ -73,6 +73,7 @@ void mausb_hcd_disconnect(const u16 port_number,
 		| USB_PORT_STAT_C_OVERCURRENT \
 		| USB_PORT_STAT_C_RESET) << 16)
 
+/* USB 2.0 specification chapter 11.24.2.7.1 table 11-21 page 427 */
 #define MAUSB_PORT_20_STATUS_CONNECT         0x0001
 #define MAUSB_PORT_20_STATUS_ENABLE          0x0002
 #define MAUSB_PORT_20_STATUS_SUSPEND         0x0004
@@ -81,9 +82,6 @@ void mausb_hcd_disconnect(const u16 port_number,
 #define MAUSB_PORT_20_STATUS_POWER           0x0100
 #define MAUSB_PORT_20_STATUS_LOW_SPEED       0x0200
 #define MAUSB_PORT_20_STATUS_HIGH_SPEED      0x0400
-
-#define MAUSB_CHANGE_PORT_20_STATUS_CONNECT  0x010000
-#define MAUSB_CHANGE_PORT_20_STATUS_RESET    0x100000
 
 /* USB 3.2 specification chapter 10.16.2.6.1 table 10-13 page 440 */
 #define MAUSB_PORT_30_STATUS_CONNECT              0x0001
@@ -146,7 +144,7 @@ struct mausb_urb_ctx {
 	struct work_struct	work;
 };
 
-int mausb_probe(struct device *dev);
+int mausb_hcd_create_and_add(struct device *dev);
 void mausb_hcd_urb_complete(struct urb *urb, u32 actual_length, int status);
 
 #ifdef ISOCH_CALLBACKS
@@ -162,6 +160,6 @@ phys_addr_t mausb_get_xfer_ring_phys_addr(struct usb_hcd *hcd,
 int mausb_get_core_id(struct usb_hcd *hcd);
 #endif /* ISOCH_CALLBACKS */
 
-void mausb_clear_hcd_madev(u16 port_number);
+void mausb_clear_hcd_madev(u8 port_number);
 
 #endif /* __MAUSB_HCD_H__ */

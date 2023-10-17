@@ -5,22 +5,21 @@
 #ifndef __MAUSB_IP_LINK_H__
 #define __MAUSB_IP_LINK_H__
 
-#include <linux/in.h>
-#include <linux/in6.h>
+#include <linux/in.h> /* needed for 4.4 */
+#include <linux/in6.h> /* needed for 4.4 */
 #include <linux/inet.h>
 #include <linux/list.h>
+#include <linux/miscdevice.h>
 #include <linux/workqueue.h>
 
 #define MAUSB_LINK_BUFF_SIZE	16777216
 #define MAUSB_LINK_TOS_LEVEL_EF 0xB8
 
-extern struct miscdevice mausb_host_dev;
-
 enum mausb_link_action {
 	MAUSB_LINK_CONNECT	= 0,
 	MAUSB_LINK_DISCONNECT	= 1,
 	MAUSB_LINK_RECV		= 2,
-	MAUSB_LINK_SEND		= 3
+	MAUSB_LINK_SEND		= 3,
 };
 
 enum mausb_channel {
@@ -28,7 +27,7 @@ enum mausb_channel {
 	MAUSB_ISOCH_CHANNEL = 1,
 	MAUSB_BULK_CHANNEL  = 2,
 	MAUSB_INTR_CHANNEL  = 3,
-	MAUSB_MGMT_CHANNEL  = 4
+	MAUSB_MGMT_CHANNEL  = 4,
 };
 
 struct mausb_kvec_data_wrapper {

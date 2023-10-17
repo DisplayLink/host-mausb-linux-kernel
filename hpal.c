@@ -6,7 +6,7 @@
 
 #include <linux/circ_buf.h>
 #include <linux/version.h>
-#include <net/net_namespace.h>
+#include <net/net_namespace.h> /* needed for 4.4 */
 
 #include "hcd.h"
 #include "hpal_data.h"
@@ -44,7 +44,7 @@ static inline struct mausb_urb_ctx *__mausb_find_urb_in_tree(struct urb *urb)
 
 struct mausb_urb_ctx *mausb_find_urb_in_tree(struct urb *urb)
 {
-	unsigned long flags = 0;
+	unsigned long flags;
 	struct mausb_urb_ctx *urb_ctx;
 
 	spin_lock_irqsave(&mhcd->lock, flags);
@@ -240,7 +240,7 @@ struct mausb_urb_ctx *mausb_unlink_and_delete_urb_from_tree(struct urb *urb,
 	int ret;
 
 	if (!urb) {
-		dev_warn(&urb->dev->dev, "URB is NULL");
+		dev_warn(mausb_host_dev.this_device, "URB is NULL");
 		return NULL;
 	}
 
@@ -248,7 +248,7 @@ struct mausb_urb_ctx *mausb_unlink_and_delete_urb_from_tree(struct urb *urb,
 
 	urb_ctx = __mausb_find_urb_in_tree(urb);
 	if (!urb_ctx) {
-		dev_warn(&urb->dev->dev, "Urb=%p not in tree", urb);
+		dev_warn(mausb_host_dev.this_device, "Urb=%p not in tree", urb);
 		spin_unlock_irqrestore(&mhcd->lock, flags);
 		return NULL;
 	}
@@ -337,7 +337,7 @@ static int mausb_send_mgmt_msg(struct mausb_device *dev,
 
 	hdr = (struct ma_usb_hdr_common *)event->mgmt.mgmt_hdr.hdr;
 
-	dev_info(mausb_host_dev.this_device, "Sending event=%d, type=%d",
+	dev_vdbg(mausb_host_dev.this_device, "Sending event=%d, type=%d",
 		 event->type, hdr->type);
 
 	kvec.iov_base	 = hdr;
@@ -357,7 +357,7 @@ static int mausb_send_mgmt_msg(struct mausb_device *dev,
 	return status;
 }
 
-static int mausb_get_first_free_port_number(u16 *port_number)
+static int mausb_get_first_free_port_number(u8 *port_number)
 {
 	(*port_number) = 0;
 	while ((mhcd->connected_ports & (1 << *port_number)) != 0 &&
@@ -376,8 +376,8 @@ static inline void mausb_port_has_changed_event(struct mausb_device *dev,
 						struct mausb_event *event)
 {
 	int status;
-	u16 port_number;
-	unsigned long flags = 0;
+	u8 port_number;
+	unsigned long flags;
 
 	spin_lock_irqsave(&mhcd->lock, flags);
 
@@ -416,7 +416,7 @@ static void mausb_process_event(struct mausb_device *dev,
 				struct mausb_event *event)
 {
 	dev_vdbg(mausb_host_dev.this_device, "Process event of type=%d",
-		event->type);
+		 event->type);
 
 	switch (event->type) {
 	case MAUSB_EVENT_TYPE_USB_DEV_HANDLE:
@@ -452,12 +452,16 @@ static void mausb_process_event(struct mausb_device *dev,
 	case MAUSB_EVENT_TYPE_CANCEL_TRANSFER:
 		mausb_canceltransfer_event_from_user(dev, event);
 		break;
+	case MAUSB_EVENT_TYPE_CLEAR_TRANSFERS:
+		mausb_cleartransfers_event_from_user(dev, event);
+		break;
 	case MAUSB_EVENT_TYPE_PORT_CHANGED:
 		mausb_port_has_changed_event(dev, event);
 		break;
-	case MAUSB_EVENT_TYPE_PING:
-		mausb_send_mgmt_msg(dev, event);
+	case MAUSB_EVENT_TYPE_DEV_DISCONNECT:
+		mausb_devdisconnect_event_from_user(dev, event);
 		break;
+	case MAUSB_EVENT_TYPE_PING:
 	case MAUSB_EVENT_TYPE_SEND_MGMT_MSG:
 		mausb_send_mgmt_msg(dev, event);
 		break;
@@ -680,7 +684,6 @@ static void mausb_ping_work(struct work_struct *work)
 {
 	struct mausb_device *dev = container_of(work, struct mausb_device,
 						ping_work);
-	int status = 0;
 
 	if (mausb_start_connection_timer(dev) < 0) {
 		dev_err(mausb_host_dev.this_device, "Session timeout - disconnnecting device madev_addr=%d",
@@ -690,11 +693,7 @@ static void mausb_ping_work(struct work_struct *work)
 		return;
 	}
 
-	status = mausb_ping_event_to_user(dev);
-	if (status < 0) {
-		dev_err(mausb_host_dev.this_device, "Ring buffer full");
-		return;
-	}
+	mausb_ping_event_to_user(dev);
 }
 
 static void mausb_heartbeat_work(struct work_struct *work)
@@ -730,7 +729,7 @@ static void mausb_heartbeat_timer_func(struct timer_list *timer)
 static void mausb_heartbeat_timer_func(unsigned long data)
 {
 #endif
-	unsigned long flags = 0;
+	unsigned long flags;
 	struct mausb_device *dev = NULL;
 
 	if (mausb_start_heartbeat_timer() < 0) {
@@ -757,7 +756,7 @@ mausb_create_madev(struct mausb_device_address dev_addr, u8 madev_address,
 		   int *status)
 {
 	struct mausb_device *dev;
-	unsigned long flags = 0;
+	unsigned long flags;
 	char workq_name[16];
 	struct workqueue_struct *workq;
 
@@ -848,7 +847,7 @@ mausb_create_madev(struct mausb_device_address dev_addr, u8 madev_address,
 						list_entry);
 		list_del(mss.available_ring_buffers.next);
 	} else {
-		dev_alert(mausb_host_dev.this_device, "Ring buffer for mausb device is not availbale!");
+		dev_alert(mausb_host_dev.this_device, "Ring buffer for mausb device is not available!");
 	}
 
 	list_add_tail(&dev->list_entry, &mss.madev_list);
@@ -875,7 +874,7 @@ int mausb_initiate_dev_connection(struct mausb_device_address dev_addr,
 {
 	int error = 0;
 	struct mausb_device *dev;
-	unsigned long flags = 0;
+	unsigned long flags;
 
 	spin_lock_irqsave(&mss.lock, flags);
 	dev = mausb_get_dev_from_addr_unsafe(madev_address);
@@ -888,7 +887,6 @@ int mausb_initiate_dev_connection(struct mausb_device_address dev_addr,
 	}
 
 	dev = mausb_create_madev(dev_addr, madev_address, &error);
-
 	if (!dev)
 		return error;
 
@@ -1046,7 +1044,7 @@ int mausb_signal_event(struct mausb_device *dev,
 
 static int mausb_start_connection_timer(struct mausb_device *dev)
 {
-	unsigned long flags = 0;
+	unsigned long flags;
 
 	spin_lock_irqsave(&dev->connection_timer_lock, flags);
 
@@ -1066,7 +1064,7 @@ static int mausb_start_connection_timer(struct mausb_device *dev)
 
 void mausb_reset_connection_timer(struct mausb_device *dev)
 {
-	unsigned long flags = 0;
+	unsigned long flags;
 
 	spin_lock_irqsave(&dev->connection_timer_lock, flags);
 	dev->receive_failures_num = 0;
@@ -1078,7 +1076,7 @@ void mausb_reset_connection_timer(struct mausb_device *dev)
 
 static int mausb_start_heartbeat_timer(void)
 {
-	unsigned long flags = 0;
+	unsigned long flags;
 
 	spin_lock_irqsave(&mss.lock, flags);
 	if (++mss.missed_heartbeats > MAUSB_MAX_MISSED_HEARTBEATS) {
@@ -1097,7 +1095,7 @@ static int mausb_start_heartbeat_timer(void)
 
 void mausb_reset_heartbeat_cnt(void)
 {
-	unsigned long flags = 0;
+	unsigned long flags;
 
 	spin_lock_irqsave(&mss.lock, flags);
 	mss.missed_heartbeats = 0;
@@ -1131,10 +1129,8 @@ static void mausb_execute_urb_dequeue(struct work_struct *dequeue_work)
 							    ep_ctx->dev_handle,
 							    ep_ctx->ep_handle,
 							    (uintptr_t)urb);
-		if (status < 0) {
-			dev_err(mausb_host_dev.this_device, "Failed to enqueue cancel transfer to user");
+		if (status < 0)
 			goto complete_urb;
-		}
 	}
 
 	memset(&mausb_event, 0, sizeof(mausb_event));
@@ -1205,7 +1201,7 @@ void mausb_initialize_mss(void)
 void mausb_deinitialize_mss(void)
 {
 	struct mausb_device *dev = NULL;
-	unsigned long flags = 0;
+	unsigned long flags;
 	unsigned long timeout =
 			msecs_to_jiffies(MAUSB_CLIENT_STOPPED_TIMEOUT_MS);
 
@@ -1226,13 +1222,14 @@ void mausb_deinitialize_mss(void)
 	mausb_stop_ring_events();
 
 	timeout = wait_for_completion_timeout(&mss.client_stopped, timeout);
-	dev_info(mausb_host_dev.this_device, "Remaining time after waiting for stopping client %ld",
-		 timeout);
+	if (timeout > 0)
+		dev_dbg(mausb_host_dev.this_device, "Remaining time after waiting for stopping client %ld",
+			timeout);
 }
 
 int mausb_register_power_state_listener(void)
 {
-	dev_info(mausb_host_dev.this_device, "Registering power states listener");
+	dev_dbg(mausb_host_dev.this_device, "Registering power states listener");
 
 	mhcd->power_state_listener.notifier_call = mausb_power_state_cb;
 	return register_pm_notifier(&mhcd->power_state_listener);
@@ -1240,7 +1237,7 @@ int mausb_register_power_state_listener(void)
 
 void mausb_unregister_power_state_listener(void)
 {
-	dev_info(mausb_host_dev.this_device, "Un-registering power states listener");
+	dev_dbg(mausb_host_dev.this_device, "Un-registering power states listener");
 
 	unregister_pm_notifier(&mhcd->power_state_listener);
 }
@@ -1248,7 +1245,7 @@ void mausb_unregister_power_state_listener(void)
 static int mausb_power_state_cb(struct notifier_block *nb, unsigned long action,
 				void *data)
 {
-	unsigned long flags = 0;
+	unsigned long flags;
 	struct mausb_device *dev = NULL;
 
 	dev_info(mausb_host_dev.this_device, "Power state callback action = %ld",
@@ -1333,8 +1330,9 @@ struct mausb_device *mausb_get_dev_from_addr_unsafe(u8 madev_addr)
 
 static void mausb_remove_madev_from_list(u8 madev_addr)
 {
-	unsigned long flags = 0;
-	struct mausb_device *ma_dev, *tmp = NULL;
+	unsigned long flags;
+	struct mausb_device *ma_dev = NULL;
+	struct mausb_device *tmp = NULL;
 
 	spin_lock_irqsave(&mss.lock, flags);
 
@@ -1353,7 +1351,7 @@ static void mausb_remove_madev_from_list(u8 madev_addr)
 
 static void mausb_signal_empty_mss(void)
 {
-	unsigned long flags = 0;
+	unsigned long flags;
 
 	spin_lock_irqsave(&mss.lock, flags);
 	if (list_empty(&mss.madev_list))
@@ -1381,7 +1379,6 @@ int mausb_send_data(struct mausb_device *dev, enum mausb_channel channel_num,
 		return -ECHRNG;
 
 	status = mausb_ip_send(channel, data);
-
 	if (status < 0) {
 		dev_err(mausb_host_dev.this_device, "Send failed. Disconnecting... status=%d",
 			status);
@@ -1968,7 +1965,7 @@ u32 mausb_data_iterator_length(struct mausb_data_iter *iterator)
 static int mausb_ring_buffer_get(struct mausb_ring_buffer *ring,
 				 struct mausb_event *event)
 {
-	unsigned long flags = 0;
+	unsigned long flags;
 
 	spin_lock_irqsave(&ring->lock, flags);
 	if (CIRC_CNT(ring->head, ring->tail, MAUSB_RING_BUFFER_SIZE) < 1) {
@@ -2007,7 +2004,7 @@ int mausb_ring_buffer_init(struct mausb_ring_buffer *ring)
 int mausb_ring_buffer_put(struct mausb_ring_buffer *ring,
 			  struct mausb_event *event)
 {
-	unsigned long flags = 0;
+	unsigned long flags;
 
 	spin_lock_irqsave(&ring->lock, flags);
 
@@ -2027,17 +2024,17 @@ int mausb_ring_buffer_put(struct mausb_ring_buffer *ring,
 	}
 	memcpy(ring->to_user_buffer + ring->head, event, sizeof(*event));
 	dev_vdbg(mausb_host_dev.this_device, "HEAD=%d, TAIL=%d",
-		ring->head, ring->tail);
+		 ring->head, ring->tail);
 	ring->head = (ring->head + 1) & (MAUSB_RING_BUFFER_SIZE - 1);
 	dev_vdbg(mausb_host_dev.this_device, "HEAD=%d, TAIL=%d",
-		ring->head, ring->tail);
+		 ring->head, ring->tail);
 	spin_unlock_irqrestore(&ring->lock, flags);
 	return 0;
 }
 
 int mausb_ring_buffer_move_tail(struct mausb_ring_buffer *ring, u32 count)
 {
-	unsigned long flags = 0;
+	unsigned long flags;
 
 	spin_lock_irqsave(&ring->lock, flags);
 	if (CIRC_CNT(ring->head, ring->tail, MAUSB_RING_BUFFER_SIZE) < count) {
@@ -2045,10 +2042,10 @@ int mausb_ring_buffer_move_tail(struct mausb_ring_buffer *ring, u32 count)
 		return -ENOSPC;
 	}
 	dev_vdbg(mausb_host_dev.this_device, "old HEAD=%d, TAIL=%d",
-		ring->head, ring->tail);
+		 ring->head, ring->tail);
 	ring->tail = (ring->tail + (int)count) & (MAUSB_RING_BUFFER_SIZE - 1);
 	dev_vdbg(mausb_host_dev.this_device, "new HEAD=%d, TAIL=%d",
-		ring->head, ring->tail);
+		 ring->head, ring->tail);
 	spin_unlock_irqrestore(&ring->lock, flags);
 	return 0;
 }

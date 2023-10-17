@@ -65,6 +65,9 @@ int mausb_updatedev_event_from_user(struct mausb_device *dev,
 int mausb_usbdevdisconnect_event_to_user(struct mausb_device *dev,
 					 u16 dev_handle);
 int mausb_ping_event_to_user(struct mausb_device *dev);
+int mausb_devdisconnect_event_to_user(struct mausb_device *dev);
+int mausb_devdisconnect_event_from_user(struct mausb_device *dev,
+					struct mausb_event *event);
 int mausb_usbdevreset_event_to_user(struct mausb_device *dev,
 				    u16 device_handle);
 int mausb_usbdevreset_event_from_user(struct mausb_device *dev,
@@ -74,10 +77,13 @@ int mausb_canceltransfer_event_to_user(struct mausb_device *dev,
 				       uintptr_t urb);
 int mausb_canceltransfer_event_from_user(struct mausb_device *dev,
 					 struct mausb_event *event);
+int mausb_cleartransfers_event_to_user(struct mausb_device *dev,
+				       u16 device_handle,
+				       u16 ep_handle);
+int mausb_cleartransfers_event_from_user(struct mausb_device *dev,
+					 struct mausb_event *event);
 
 void mausb_dev_reset_req_event(struct mausb_event *event);
-int mausb_canceltransfer_event_from_user(struct mausb_device *dev,
-					 struct mausb_event *event);
 void mausb_cleanup_send_data_msg_event(struct mausb_event *event);
 void mausb_cleanup_received_data_msg_event(struct mausb_event *event);
 void mausb_cleanup_delete_data_transfer_event(struct mausb_event *event);

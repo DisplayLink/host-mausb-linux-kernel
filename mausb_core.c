@@ -23,7 +23,7 @@ static u8				mausb_client_disconnect_param;
 static int mausb_client_connect(const char *value,
 				const struct kernel_param *kp)
 {
-	unsigned long flags = 0;
+	unsigned long flags;
 
 	spin_lock_irqsave(&mss.lock, flags);
 	if (mss.client_connected) {
@@ -46,7 +46,7 @@ static int mausb_client_connect(const char *value,
 static int mausb_client_disconnect(const char *value,
 				   const struct kernel_param *kp)
 {
-	unsigned long flags = 0;
+	unsigned long flags;
 	struct mausb_device *dev = NULL;
 
 	spin_lock_irqsave(&mss.lock, flags);
@@ -55,7 +55,6 @@ static int mausb_client_disconnect(const char *value,
 		spin_unlock_irqrestore(&mss.lock, flags);
 		return -ENODEV;
 	}
-
 	spin_unlock_irqrestore(&mss.lock, flags);
 
 	/* Stop heartbeat timer */
@@ -81,6 +80,9 @@ static int mausb_device_connect(const char *value,
 {
 	int status = 0;
 
+	if (!value)
+		return -EINVAL;
+
 	if (strlen(value) <= INET6_ADDRSTRLEN) {
 		strcpy(device_address.ip.address, value);
 		dev_info(mausb_host_dev.this_device, "Processing '%s' address",
@@ -100,8 +102,11 @@ static int mausb_device_disconnect(const char *value,
 {
 	u8 dev_address = 0;
 	int status = 0;
-	unsigned long flags = 0;
+	unsigned long flags;
 	struct mausb_device *dev = NULL;
+
+	if (!value)
+		return -EINVAL;
 
 	status = kstrtou8(value, 0, &dev_address);
 	if (status < 0)
@@ -159,9 +164,9 @@ static int mausb_host_init(void)
 	int status = mausb_host_dev_register();
 
 	if (status < 0)
-		goto exit;
+		return status;
 
-	status = mausb_init_hcd();
+	status = mausb_host_driver_init();
 	if (status < 0)
 		goto cleanup_dev;
 
@@ -174,19 +179,17 @@ static int mausb_host_init(void)
 	return 0;
 
 cleanup:
-	mausb_deinit_hcd();
+	mausb_host_driver_deinit();
 cleanup_dev:
 	mausb_host_dev_deregister();
-exit:
 	return status;
 }
 
 static void mausb_host_exit(void)
 {
-	dev_info(mausb_host_dev.this_device, "Module unloading started...");
 	mausb_unregister_power_state_listener();
 	mausb_deinitialize_mss();
-	mausb_deinit_hcd();
+	mausb_host_driver_deinit();
 	mausb_host_dev_deregister();
 }
 

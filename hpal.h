@@ -6,7 +6,7 @@
 #define __MAUSB_HPAL_H__
 
 #include <linux/miscdevice.h>
-#include <linux/scatterlist.h>
+#include <linux/scatterlist.h> /* needed for 4.4 */
 #include <linux/suspend.h>
 #include <linux/usb.h>
 
@@ -32,7 +32,7 @@ extern struct miscdevice mausb_host_dev;
 enum mausb_isoch_header_format_size {
 	MAUSB_ISOCH_SHORT_FORMAT_SIZE	 = 4,
 	MAUSB_ISOCH_STANDARD_FORMAT_SIZE = 8,
-	MAUSB_ISOCH_LONG_FORMAT_SIZE	 = 12
+	MAUSB_ISOCH_LONG_FORMAT_SIZE	 = 12,
 };
 
 struct mausb_completion {
@@ -93,8 +93,8 @@ struct mausb_device {
 	u8 lse;
 	u8 madev_addr;
 	u8 dev_connected;
+	u8 port_number;
 	u16 id;
-	u16 port_number;
 
 	u64		event_id;
 	spinlock_t	event_id_lock; /* Lock event ID increments */
